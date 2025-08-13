@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>セッション管理.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<p>できます！やり方は2通りありますが、ここではご要望どおり <strong>Redis にサーバーサイド保存</strong>するパターン（“クッキーには参照用キーだけ入れる”）の<strong>サンプル実装</strong>を示します。Quarkus には拡張ポイントがあり、<strong><code>io.quarkus.oidc.TokenStateManager</code></strong> を自作 CDI Bean で差し替えるだけで実現できます。</p>
+<blockquote>
+<p>ポイント</p>
+<ul>
+<li><strong>セッションの実体（ID/Access/Refresh トークン等）を Redis に保存</strong></li>
+<li><strong>ブラウザのクッキーには短いキー（例: <code>sid</code>）のみ</strong>を入れる</li>
+<li>既存の “state クッキー” とは<strong>別管理</strong>（= クッキー肥大化の回避 &amp; サーバーサイド失効が容易）</li>
+</ul>
+</blockquote>
+<hr>
+<h1 id="1-%E4%BE%9D%E5%AD%98%E9%96%A2%E4%BF%82%E3%81%AE%E8%BF%BD%E5%8A%A0quarkus-authz-%E3%83%A2%E3%82%B8%E3%83%A5%E3%83%BC%E3%83%AB">1) 依存関係の追加（<code>quarkus-authz</code> モジュール）</h1>
+<p><code>quarkus-authz/pom.xml</code> に Redis クライアントを追加：</p>
+<pre class="hljs"><code><div><span class="hljs-tag">&lt;<span class="hljs-name">dependency</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-name">groupId</span>&gt;</span>io.quarkus<span class="hljs-tag">&lt;/<span class="hljs-name">groupId</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-name">artifactId</span>&gt;</span>quarkus-redis-client<span class="hljs-tag">&lt;/<span class="hljs-name">artifactId</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">dependency</span>&gt;</span>
+</div></code></pre>
+<blockquote>
+<p>すでに Quarkus BOM を入れているので version 指定は不要です。</p>
+</blockquote>
+<hr>
+<h1 id="2-%E6%8E%A5%E7%B6%9A%E8%A8%AD%E5%AE%9Aquarkus-authz">2) 接続設定（<code>quarkus-authz</code>）</h1>
+<p><code>quarkus-authz/src/main/resources/application.properties</code> に追記：</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Redis 接続（Compose のサービス名に合わせる）</span>
+<span class="hljs-meta">quarkus.redis.hosts</span>=<span class="hljs-string">redis://redis:6379</span>
+<span class="hljs-comment">
+# （任意）トークンをクッキーに入れない前提なので暗号化は不要</span>
+<span class="hljs-comment"># ＝クッキーには参照キーのみ。ネットワークが安全でないなら true に戻してください</span>
+<span class="hljs-meta">quarkus.oidc.token-state-manager.encryption-required</span>=<span class="hljs-string">false</span>
+</div></code></pre>
+<blockquote>
+<p>すでに <code>REDIS_HOST=redis</code> を渡しているなら環境変数展開でもOKです（<code>quarkus.redis.hosts=${REDIS_URL:redis://redis:6379}</code> など）。</p>
+</blockquote>
+<hr>
+<h1 id="3-%E5%AE%9F%E8%A3%85redis-%E3%83%90%E3%83%83%E3%82%AF%E3%82%A8%E3%83%B3%E3%83%89%E3%81%AE-tokenstatemanager">3) 実装：Redis バックエンドの TokenStateManager</h1>
+<p><code>quarkus-authz/src/main/java/org/example/security/RedisTokenStateManager.java</code>（新規）：</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">package</span> org.example.security;
+
+<span class="hljs-keyword">import</span> java.time.Duration;
+<span class="hljs-keyword">import</span> java.util.Map;
+<span class="hljs-keyword">import</span> java.util.UUID;
+
+<span class="hljs-keyword">import</span> jakarta.annotation.Priority;
+<span class="hljs-keyword">import</span> jakarta.enterprise.context.ApplicationScoped;
+<span class="hljs-keyword">import</span> jakarta.enterprise.inject.Alternative;
+<span class="hljs-keyword">import</span> jakarta.inject.Inject;
+
+<span class="hljs-keyword">import</span> com.fasterxml.jackson.core.type.TypeReference;
+<span class="hljs-keyword">import</span> com.fasterxml.jackson.databind.ObjectMapper;
+
+<span class="hljs-keyword">import</span> io.quarkus.oidc.TokenStateManager;
+<span class="hljs-keyword">import</span> io.quarkus.oidc.Tokens;
+<span class="hljs-keyword">import</span> io.quarkus.redis.datasource.RedisDataSource;
+<span class="hljs-keyword">import</span> io.quarkus.redis.datasource.string.SetArgs;
+<span class="hljs-keyword">import</span> io.quarkus.redis.datasource.string.StringCommands;
+
+<span class="hljs-comment">/**
+ * OIDC のセッション（ID/Access/Refresh トークン）を Redis に保存し、
+ * クッキーには参照キー（state id）のみを入れる実装。
+ *
+ * 注意：Quarkus 3.11.1 時点の TokenStateManager のメソッド名/引数に
+ *       若干の差分がある場合は、IDE の補完に合わせて微調整してください。
+ */</span>
+<span class="hljs-meta">@Alternative</span>
+<span class="hljs-meta">@Priority</span>(<span class="hljs-number">1</span>) <span class="hljs-comment">// ← 組み込み実装より優先させる</span>
+<span class="hljs-meta">@ApplicationScoped</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">RedisTokenStateManager</span> <span class="hljs-keyword">implements</span> <span class="hljs-title">TokenStateManager</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String KEY_PREFIX = <span class="hljs-string">"q:oidc:sess:"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> Duration DEFAULT_TTL = Duration.ofMinutes(<span class="hljs-number">30</span>); <span class="hljs-comment">// 適宜</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> StringCommands&lt;String, String&gt; str;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> ObjectMapper mapper = <span class="hljs-keyword">new</span> ObjectMapper();
+
+    <span class="hljs-meta">@Inject</span>
+    <span class="hljs-function"><span class="hljs-keyword">public</span> <span class="hljs-title">RedisTokenStateManager</span><span class="hljs-params">(RedisDataSource ds)</span> </span>{
+        <span class="hljs-keyword">this</span>.str = ds.string(String<span class="hljs-class">.<span class="hljs-keyword">class</span>)</span>;
+    }
+
+    <span class="hljs-comment">/**
+     * 「トークンをクッキーに詰める代わりに」Redis に保存し、
+     * クッキーにはこのメソッドの戻り値（＝stateId）だけを入れてもらう。
+     */</span>
+    <span class="hljs-meta">@Override</span>
+    <span class="hljs-function"><span class="hljs-keyword">public</span> String <span class="hljs-title">createTokenState</span><span class="hljs-params">(Tokens tokens)</span> </span>{
+        <span class="hljs-comment">// 参照キー（state id）を生成</span>
+        String stateId = UUID.randomUUID().toString();
+
+        <span class="hljs-comment">// 保存する中身（必要に応じて項目追加）</span>
+        Map&lt;String, Object&gt; payload = Map.of(
+            <span class="hljs-string">"id_token"</span>, tokens.getIdToken(),
+            <span class="hljs-string">"access_token"</span>, tokens.getAccessToken(),
+            <span class="hljs-string">"refresh_token"</span>, tokens.getRefreshToken(),
+            <span class="hljs-string">"expires_at"</span>, tokens.getExpiresIn() != <span class="hljs-keyword">null</span> ? System.currentTimeMillis() + tokens.getExpiresIn() * <span class="hljs-number">1000L</span> : <span class="hljs-keyword">null</span>
+        );
+
+        <span class="hljs-keyword">try</span> {
+            String json = mapper.writeValueAsString(payload);
+            str.set(KEY_PREFIX + stateId, json, <span class="hljs-keyword">new</span> SetArgs().ex(DEFAULT_TTL));
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IllegalStateException(<span class="hljs-string">"Failed to write token state to Redis"</span>, e);
+        }
+        <span class="hljs-comment">// ← クッキーにはこの stateId が保存され、以降の復元で使われる</span>
+        <span class="hljs-keyword">return</span> stateId;
+    }
+
+    <span class="hljs-comment">/**
+     * クッキーに入っていた stateId を使って Redis からトークンを復元。
+     */</span>
+    <span class="hljs-meta">@Override</span>
+    <span class="hljs-function"><span class="hljs-keyword">public</span> Tokens <span class="hljs-title">getTokens</span><span class="hljs-params">(String tokenState)</span> </span>{
+        <span class="hljs-keyword">try</span> {
+            String json = str.get(KEY_PREFIX + tokenState);
+            <span class="hljs-keyword">if</span> (json == <span class="hljs-keyword">null</span>) {
+                <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>; <span class="hljs-comment">// 期限切れ or 無効</span>
+            }
+            Map&lt;String, Object&gt; payload = mapper.readValue(json, <span class="hljs-keyword">new</span> TypeReference&lt;Map&lt;String, Object&gt;&gt;() {});
+            String id = (String) payload.get(<span class="hljs-string">"id_token"</span>);
+            String at = (String) payload.get(<span class="hljs-string">"access_token"</span>);
+            String rt = (String) payload.get(<span class="hljs-string">"refresh_token"</span>);
+
+            <span class="hljs-comment">// TTL を延長したい場合はここで touch</span>
+            str.expire(KEY_PREFIX + tokenState, (<span class="hljs-keyword">int</span>) DEFAULT_TTL.getSeconds());
+
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> Tokens(id, at, rt);
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IllegalStateException(<span class="hljs-string">"Failed to read token state from Redis"</span>, e);
+        }
+    }
+
+    <span class="hljs-comment">/**
+     * ログアウト等のタイミングでサーバーサイドのセッションを消す。
+     */</span>
+    <span class="hljs-meta">@Override</span>
+    <span class="hljs-function"><span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">removeTokens</span><span class="hljs-params">(String tokenState)</span> </span>{
+        str.del(KEY_PREFIX + tokenState);
+    }
+
+    <span class="hljs-comment">/**
+     * トークンを更新した際（リフレッシュ）に呼ばれる想定。
+     * 実装が不要な場合は createTokenState を再利用しても良い。
+     */</span>
+    <span class="hljs-meta">@Override</span>
+    <span class="hljs-function"><span class="hljs-keyword">public</span> String <span class="hljs-title">updateTokenState</span><span class="hljs-params">(String tokenState, Tokens newTokens)</span> </span>{
+        <span class="hljs-comment">// 既存キーを上書き（stateId は据え置き）</span>
+        <span class="hljs-keyword">try</span> {
+            Map&lt;String, Object&gt; payload = Map.of(
+                <span class="hljs-string">"id_token"</span>, newTokens.getIdToken(),
+                <span class="hljs-string">"access_token"</span>, newTokens.getAccessToken(),
+                <span class="hljs-string">"refresh_token"</span>, newTokens.getRefreshToken(),
+                <span class="hljs-string">"expires_at"</span>, newTokens.getExpiresIn() != <span class="hljs-keyword">null</span> ? System.currentTimeMillis() + newTokens.getExpiresIn() * <span class="hljs-number">1000L</span> : <span class="hljs-keyword">null</span>
+            );
+            String json = mapper.writeValueAsString(payload);
+            str.set(KEY_PREFIX + tokenState, json, <span class="hljs-keyword">new</span> SetArgs().ex(DEFAULT_TTL));
+            <span class="hljs-keyword">return</span> tokenState;
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IllegalStateException(<span class="hljs-string">"Failed to update token state in Redis"</span>, e);
+        }
+    }
+}
+</div></code></pre>
+<blockquote>
+<p><strong>注</strong>：<code>TokenStateManager</code> のメソッド名/シグネチャは Quarkus のバージョンで微妙に変わることがあります。IDE の補完に従って上記のメソッド名（<code>createTokenState/getTokens/removeTokens/updateTokenState</code> 等）を合わせてください。
+ログに出ていた「custom TokenStateManager を登録」というメッセージ通り、<strong><code>@Alternative @Priority(1)</code></strong> が肝です。</p>
+</blockquote>
+<hr>
+<h1 id="4-%E4%BD%BF%E3%81%84%E6%96%B9">4) 使い方</h1>
+<ul>
+<li>
+<p>実装を追加したら <code>quarkus-authz</code> を <strong>再ビルド</strong> → <strong>再起動</strong>：</p>
+<pre class="hljs"><code><div><span class="hljs-built_in">cd</span> quarkus-authz &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
+docker compose up -d --build quarkus-authz
+</div></code></pre>
+</li>
+<li>
+<p>初回アクセスでコードフロー完了後、<strong>クッキーには <code>stateId</code> だけ</strong>入り、
+トークンの実体は <strong><code>redis</code> コンテナ</strong>の中に <code>q:oidc:sess:&lt;uuid&gt;</code> で保存されます。</p>
+</li>
+</ul>
+<hr>
+<h1 id="5-%E5%A4%B1%E5%8A%B9%E3%83%BB%E3%83%AD%E3%82%B0%E3%82%A2%E3%82%A6%E3%83%88%E3%81%AE%E6%89%B1%E3%81%84">5) 失効・ログアウトの扱い</h1>
+<ul>
+<li>サインアウト時に <code>removeTokens(stateId)</code> が呼ばれ、Redis のキーを削除 → <strong>即時失効</strong>できます。</li>
+<li><strong>強制ログアウト</strong>（管理側）を作りたい場合は、Redis の該当キーを消すだけでも OK。
+次回アクセス時に復元できず 401→再ログイン、という流れになります。</li>
+</ul>
+<hr>
+<h1 id="6-%E5%8B%95%E4%BD%9C%E7%A2%BA%E8%AA%8D%E3%81%AE%E3%83%92%E3%83%B3%E3%83%88">6) 動作確認のヒント</h1>
+<ul>
+<li>
+<p>Redis に入ったかを確認（コンテナ内）：</p>
+<pre class="hljs"><code><div>docker <span class="hljs-built_in">exec</span> -it 3-redis-1 redis-cli
+keys q:oidc:sess:*
+ttl q:oidc:sess:&lt;stateId&gt;
+get q:oidc:sess:&lt;stateId&gt;  <span class="hljs-comment"># ← JSON が見えます（本番では見えない運用が望ましい）</span>
+</div></code></pre>
+</li>
+<li>
+<p>クッキーサイズの警告が消える（もしくは大幅に減る）はずです。</p>
+</li>
+</ul>
+<hr>
+<h1 id="7-%E4%BB%A3%E6%9B%BF%E6%A1%88%E5%8F%82%E8%80%83">7) 代替案（参考）</h1>
+<ul>
+<li>すぐ使える公式ストア：<strong><code>quarkus-oidc-db-token-state-manager</code></strong>（JDBC）
+→ Postgres などに保存。Redis ではなく DB で良ければ最短です。</li>
+<li>入口で 302 を避けたい：<code>/mashup</code> を Bearer 専用テナントだけに割り当て、401→フロントで <code>/authorize</code> に誘導する方式も可能。</li>
+</ul>
+<hr>
+<p>必要なら、この Redis 実装を **抽象化（マルチテナント対応・JSON スキーマ厳格化・暗号化）**してもう少し堅牢にする版も用意できます。ログアウト API、TTL ルール、キー回転ポリシーなどもあわせて整備できますよ。</p>
+
+</body>
+</html>

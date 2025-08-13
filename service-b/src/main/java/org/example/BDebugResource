@@ -1,0 +1,26 @@
+// service-a 用の例:
+import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.inject.Inject;
+
+// @Path("/b")
+// public class BDebugResource {
+//   @Inject SecurityIdentity id;
+
+//   @GET @Path("/debug") @Produces(MediaType.APPLICATION_JSON)
+//   public Map<String,Object> debug() {
+//     return Map.of(
+//       "principal", id.getPrincipal().getName(),
+//       "roles", id.getRoles()
+//     );
+//   }
+// }
+
+@Path("/b/debug") // service-b は "/b/debug"
+@jakarta.annotation.security.PermitAll
+@GET @Produces(MediaType.TEXT_PLAIN)
+public String debug(@jakarta.ws.rs.core.Context jakarta.ws.rs.core.SecurityContext ctx) {
+    var id = (io.quarkus.security.identity.SecurityIdentity) ctx.getUserPrincipal();
+    var roles = id != null ? id.getRoles() : java.util.Set.of();
+    return "principal=" + (id != null ? id.getPrincipal().getName() : "anonymous")
+         + ", roles=" + roles;
+}

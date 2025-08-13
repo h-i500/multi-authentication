@@ -1,0 +1,12 @@
+org\example\HelloResource.class
+org\example\MashupResource$ServiceBResponse.class
+org\example\AuthzResource.class
+org\example\MashupResource$ServiceAResponse.class
+org\example\MashupResource.class
+org\example\MashupResource$ServiceAClient.class
+org\example\MashupResource$MashupResult.class
+org\example\ServiceBClient.class
+org\example\MashupResource$ServiceBClient.class
+org\example\AuthzRequest.class
+org\example\RegisterRestClient.class
+org\example\ServiceAClient.class
