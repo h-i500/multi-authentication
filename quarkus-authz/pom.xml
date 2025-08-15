@@ -1,6 +1,5 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>org.example</groupId>
@@ -16,7 +15,9 @@
     <!-- Quarkus 3.x の推奨指定 -->
     <quarkus.platform.group-id>io.quarkus</quarkus.platform.group-id>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
-    <quarkus.platform.version>3.11.1</quarkus.platform.version>
+    <!-- <quarkus.platform.version>3.11.1</quarkus.platform.version>
+    <quarkus-plugin.version>${quarkus.platform.version}</quarkus-plugin.version> -->
+    <quarkus.platform.version>3.25.1</quarkus.platform.version>
     <quarkus-plugin.version>${quarkus.platform.version}</quarkus-plugin.version>
   </properties>
 
@@ -68,6 +69,13 @@
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-arc</artifactId>
     </dependency>
+
+    <!-- Redis Token State Manager -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-oidc-redis-token-state-manager</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>
