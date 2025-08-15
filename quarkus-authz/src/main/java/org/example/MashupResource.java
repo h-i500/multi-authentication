@@ -16,25 +16,10 @@ import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.oidc.Tenant;
 
 
-// @Tenant("svc")
-@Tenant("service")
+// テナントをserviceで指定する場合は、以下コメントアウトを外してください。
+// @Tenant("service")
 @Path("/mashup")
 public class MashupResource {
-
-    @RegisterRestClient(configKey = "service-a")
-    public interface ServiceAClient {
-    @GET @Path("/a/data")
-    @Produces(MediaType.APPLICATION_JSON)
-    ServiceAResponse call(@HeaderParam("Authorization") String authorization);
-    }
-
-    @RegisterRestClient(configKey = "service-b")
-    public interface ServiceBClient {
-    @GET @Path("/b/data")
-    @Produces(MediaType.APPLICATION_JSON)
-    ServiceBResponse call(@HeaderParam("Authorization") String authorization);
-    }
-
 
     @Inject @RestClient ServiceAClient serviceA;
     @Inject @RestClient ServiceBClient serviceB;
@@ -71,5 +56,4 @@ public class MashupResource {
     public static class ServiceBResponse { public String message; public String detail; }
     public static class MashupResult { public ServiceAResponse fromServiceA; public ServiceBResponse fromServiceB; }
 }
-
 

@@ -1,5 +1,11 @@
 package org.example;
 
+import java.util.Map;
+
+import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.security.RolesAllowed;
+import jakarta.inject.Inject;
+
 // import jakarta.annotation.security.RolesAllowed;
 // import jakarta.ws.rs.Path;
 // import jakarta.ws.rs.Produces;
@@ -38,7 +44,17 @@ import jakarta.ws.rs.core.MediaType;
 
 @Path("/b")
 public class BResource {
+
+  @Inject SecurityIdentity identity;
+
+  @GET @Path("/whoami") @Produces("application/json")
+  public Map<String,Object> who() {
+    return Map.of("user", identity.getPrincipal().getName(),
+                  "roles", identity.getRoles());
+  }
+
   @GET
+  @RolesAllowed("read")
   @Path("/data")
   @Produces(MediaType.APPLICATION_JSON)
   public BResp get() {

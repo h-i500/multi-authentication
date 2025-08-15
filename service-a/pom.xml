@@ -45,13 +45,6 @@
     </dependencies>
     <build>
         <plugins>
-            <!-- <plugin>
-            <artifactId>maven-compiler-plugin</artifactId>
-            <version>3.13.0</version>
-            <configuration>
-                <release>17</release>
-            </configuration>
-            </plugin> -->
             <plugin>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-maven-plugin</artifactId>

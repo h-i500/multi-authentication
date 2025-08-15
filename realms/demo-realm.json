@@ -1,0 +1,84 @@
+{
+  "realm": "demo-realm",
+  "enabled": true,
+
+  "clients": [
+    {
+      "clientId": "quarkus-client",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://quarkus-authz:8000/*",
+        "http://localhost:8000/*",
+        "http://localhost:8081/*"
+      ],
+      "webOrigins": ["*"],
+      "protocolMappers": [
+        {
+          "name": "aud-service-a",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "service-a",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "aud-service-b",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "service-b",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+
+    {
+      "clientId": "service-a",
+      "protocol": "openid-connect",
+      "bearerOnly": true
+    },
+    {
+      "clientId": "service-b",
+      "protocol": "openid-connect",
+      "bearerOnly": true
+    }
+  ],
+
+  "roles": {
+    "client": {
+      "service-a": [
+        { "name": "read" },
+        { "name": "user" }
+      ],
+      "service-b": [
+        { "name": "read" },
+        { "name": "user" }
+      ]
+    }
+  },
+
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "email": "testuser@testuser.co.jp",
+      "firstName": "hiroaki.ishii",
+      "lastName": "ishii",
+      "emailVerified": false,
+      "credentials": [
+        { "type": "password", "value": "password", "temporary": false }
+      ],
+      "clientRoles": {
+        "service-a": ["read", "user"],
+        "service-b": ["read", "user"]
+      }
+    }
+  ]
+}
