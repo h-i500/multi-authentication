@@ -45,16 +45,22 @@ cd service-b     && mvn clean package && cd ..
 docker compose up -d --build kong-database redis keycloak
 # 数秒待機（Keycloak起動待ち）
 
+# 初回のみ Kong DB のマイグレーションを実行：
+docker compose run --rm kong kong migrations bootstrap
+
 docker compose up -d --build kong konga
 docker compose up -d --build service-a service-b quarkus-authz
 ```
 
 > `version` 警告は無視可。`quarkus-authz/service-a/service-b` は 8080 で Listen、Compose で 8081/9081/9082 に公開。
 
+
 ---
 
 
 # 4. Keycloak 設定（demo-realm）
+
+(以下手動で実施する場合です。docker-compose起動時、./realms/demo-realm.jsonの内容を読み込むようになっています)
 
 ## 4.1 Realm/ユーザー/クライアント作成（管理コンソール）
 
@@ -126,7 +132,79 @@ curl -sS -X POST http://localhost:8001/services/mashup-svc/routes \
   -d strip_path=false
 ```
 
+Kong のルート設定を確認：
+```bash
+curl -s http://localhost:8001/routes | jq '.data[] | {id, paths, strip_path, service_id: .service.id}'
+```
+
+paths に "/mashup" があるルートの id を控えて、strip_path=false に更新します。
+```bash
+ROUTE_ID=<さっき控えたID>
+
+curl -sS -X PATCH http://localhost:8001/routes/$ROUTE_ID \
+  -d strip_path=false
+```
+
+
 > これで \*\*[http://localhost:8000/mashup\*\*（Kong](http://localhost:8000/mashup**（Kong) 経由）→ `quarkus-authz:8080/mashup` に到達。
+
+## 以下ご参考
+> `authz-service` は **Quarkus /hello** を裏に向けます。
+> `/secure` へ来たリクエストを Quarkus `/hello` にルーティング。
+> Keycloak からのリダイレクト `/hello` にも備えて **/hello ルート**を追加します。
+
+```bash
+# 1) Service 作成（最初はベースURL）
+curl -i -X POST http://localhost:8001/services \
+  --data name=authz-service \
+  --data url=http://quarkus-authz:8080
+
+# 2) Service の URL を /hello に変更（/secure → /hello に届くように）
+curl -i -X PATCH http://localhost:8001/services/authz-service \
+  --data url=http://quarkus-authz:8080/hello
+
+# 3) /secure ルート作成（初回アクセス入口）
+curl -i -X POST http://localhost:8001/services/authz-service/routes \
+  --data paths[]=/secure
+
+# 4) /hello ルート作成（Keycloakのredirect_uri先を受ける）
+curl -i -X POST http://localhost:8001/services/authz-service/routes \
+  --data paths[]=/hello
+
+# 5) Host 情報を上流に渡す（リダイレクト復元に有利）
+SECURE_ROUTE_ID=$(curl -s http://localhost:8001/routes | jq -r '.data[] | select(.paths|index("/secure")) | .id')
+HELLO_ROUTE_ID=$(curl -s http://localhost:8001/routes | jq -r '.data[] | select(.paths|index("/hello")) | .id')
+
+curl -i -X PATCH http://localhost:8001/routes/$SECURE_ROUTE_ID --data preserve_host=true
+curl -i -X PATCH http://localhost:8001/routes/$HELLO_ROUTE_ID  --data preserve_host=true
+
+# （任意）Kong セッション・プラグイン（保存先=Kong DB）
+# ※ OSS の session プラグインは storage=kong or cookie のみ（redisは不可）
+curl -i -X POST http://localhost:8001/routes/$SECURE_ROUTE_ID/plugins \
+  --data name=session \
+  --data config.storage=kong \
+  --data config.secret=$(openssl rand -hex 32) \
+  --data config.cookie_samesite=Lax \
+  --data config.cookie_http_only=true \
+  --data config.cookie_secure=false
+
+curl -i -X POST http://localhost:8001/routes/$HELLO_ROUTE_ID/plugins \
+  --data name=session \
+  --data config.storage=kong \
+  --data config.secret=$(openssl rand -hex 32) \
+  --data config.cookie_samesite=Lax \
+  --data config.cookie_http_only=true \
+  --data config.cookie_secure=false
+```
+
+> 🔎 補足
+>
+> * `/secure` は「入口」用の見せパス。Kong が upstream の `/hello` に繋ぎます。
+> * `/hello` ルートは **Keycloak の `redirect_uri`** を直接受けるために必要です。
+> * `preserve_host=true` で `Host: localhost:8000` が Quarkus へ伝わり、
+>   `quarkus.http.proxy.proxy-address-forwarding=true` と相まって、正しい外部 URL に復元されます。
+> * 大きなトークン等で 502/大きいヘッダ系のエラーが出たら `kong-nginx-http.conf` の値を少し増やしてください。
+
 
 ---
 
@@ -238,6 +316,13 @@ curl -i http://localhost:8000/mashup
 
   （あるいは `strategy=id-refresh-tokens` で Access Token をクッキーに含めない運用に変更）
 
+---
+
+以下で、接続が成功する場合もあります。
+```bash
+docker compose down
+docker compose up -d
+```
 ---
 
 # 10. 期待する“多段認可”の流れ（再掲）
