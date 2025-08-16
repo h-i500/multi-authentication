@@ -1,0 +1,60 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  # === Quarkus BFF (API) ===
+  - name: api-svc
+    host: quarkus-authz
+    port: 8080
+    protocol: http
+    tags: [stack-multi-authn]
+    routes:
+      - name: api-route
+        paths: ["/api"]
+        strip_path: true
+        preserve_host: true
+        path_handling: v0
+        tags: [stack-multi-authn]
+
+      - name: login-route
+        paths: ["/login"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+        tags: [stack-multi-authn]
+
+      - name: logout-route
+        paths: ["/logout"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+        tags: [stack-multi-authn]
+
+      - name: hello-route
+        paths: ["/hello"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+        tags: [stack-multi-authn]
+
+      - name: secure-route
+        paths: ["/secure"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+        tags: [stack-multi-authn]
+
+  # === Vite Dev Server (Frontend) ===
+  - name: frontend-dev
+    host: frontend
+    port: 5173
+    protocol: http
+    tags: [stack-multi-authn]
+    routes:
+      - name: frontend-dev-route
+        # ← ループ/301回避のため "/app" と "/app/" の両方を登録
+        paths: ["/app", "/app/"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v1
+        tags: [stack-multi-authn]

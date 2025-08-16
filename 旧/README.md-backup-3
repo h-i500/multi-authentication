@@ -1,0 +1,488 @@
+# 多段認証・多段認可デモ（Quarkus × Kong × Keycloak × Redis セッション）
+
+ユーザー → **Kong **`` → **Quarkus(BFF / Aggregator)** が OIDC でログイン（セッションは **Redis**） → Quarkus が **ユーザーの Access Token を下流へ転送** → **Service A / B** が各自のポリシーで認可 → 結果をマージして返却するデモ構成です。
+
+Keycloak（OIDC）× Quarkus（BFF / Aggregator）× Kong（API Gateway）× React（Vite dev-server）で構成する、多段認証・BFF/マッシュアップのサンプルです。
+**Kong で `/app` をフロントに、`/api/*` を Quarkus BFF に**振り分ける形です。OIDC のコールバックは **`/login`** に固定し、BFF 側で `/app/` に戻す運用です。
+
+フロントエンドアプリ（React）で、「mashup」ボタンを押すと、
+ユーザー → **Kong **`` → **Quarkus（BFF / Aggregator）** が OIDC でログイン（セッションは **Redis**） → Quarkus が **ユーザーの Access Token を下流へ転送** → **Service A / B** が各自のポリシーで認可 → 結果をマージして返却する構成です。
+
+
+---
+
+## アーキテクチャ
+
+```
+[Browser]
+   |
+   |  http://localhost:8000
+   v
++------------------+
+|      Kong        |  (proxy:8000, admin:8001)
++------------------+
+   | /app/*                        | /api/*, /login, /secure, /logout
+   v                               v
++------------------+            +------------------+
+|  frontend(Vite)  |            |  Quarkus BFF     |
+|  http://frontend:5173         |  http://quarkus-authz:8080
++------------------+            +---------+--------+
+                                           |
+                              (Bearer)     |  /a/*, /b/*
+                                           v
+                                 +---------+--------+
+                                 |  Service A / B   |
+                                 +------------------+
+
+Keycloak: http://keycloak:8080 (realm: demo-realm)
+Redis:    セッション保持
+Postgres: Kongaの為の DB（kongをDB-LESSにしなければ、これを利用）
+Konga:    Kong 管理UI（任意） http://localhost:1337
+```
+
+
+### ログイン・リダイレクトの流れ
+
+1. ユーザが `http://localhost:8000/app/` を開く
+2. フロントの「ログイン」→ `window.location.assign('/api/login')`
+3. Kong → Quarkus BFF (`/api/login` → `LoginResource#login`)
+
+   * 未ログインなら **`/secure` へ 302**（Kong 経由で BFF に届く）
+   * BFF の `/secure` は `@Authenticated` なので、Quarkus OIDC のコードフローが走る
+4. Keycloak ログイン → コールバックは **`/login`**（Kong → BFF）
+5. BFF がセッション確立後、**`/app/` に 302** で戻す
+6. 以降、`/api/me` / `/api/mashup` は BFF 経由で動作
+
+
+### mashupアプリの流れ
+- Quarkus(BFF / Aggregator は **Authorization Code Flow**（`application-type=web-app`）
+- セッションは `` によって **Redis に外だし**（Cookie は参照キーのみ）
+- 下流A/Bは `` で **Bearer(JWT) 検証**
+
+> **Quarkus バージョン**: 3.24+（推奨 3.25.x 以降）
+
+
+
+## 前提
+
+- JDK 17
+- Maven / Docker / Docker Compose / npm / nvm
+- Docker / Docker Compose が利用できること
+- `jq` が入っていると便利（Kong の確認・掃除用）
+- （kongでDBを利用する場合は初回のみ）Kong の DB マイグレーションが必要
+- （kongでDBを利用する場合は）`deck` が入っていると便利（Kong の確認・掃除用）
+
+（参考）
+nvm
+https://github.com/coreybutler/nvm-windows/releases
+deck
+https://github.com/kong/deck/releases
+
+
+---
+
+---
+
+## クローン
+git clone https://github.com/h-i500/multi-authentication.git
+cd multi-authentication
+
+
+## ビルド
+
+各モジュールで:
+
+```bash
+cd quarkus-authz && mvn clean package && cd ..
+cd service-a     && mvn clean package && cd ..
+cd service-b     && mvn clean package && cd ..
+cd frontend      && npm i             && npm run build && cd ..
+
+```
+
+> Dockerfile は `target/quarkus-app/...` と `quarkus-run.jar` を前提とします。
+
+---
+
+## 起動（Docker Compose）
+
+```bash
+docker compose up -d --build kong-database redis keycloak
+# 数秒待機（Keycloak 起動待ち）
+
+# （kongでDBを利用する場合は初回のみ） Kong DB のマイグレーション
+docker compose run --rm kong kong migrations bootstrap
+
+# ゲートウェイ/UI
+docker compose up -d --build kong konga
+
+# アプリ群
+docker compose up -d --build service-a service-b quarkus-authz frontend
+```
+
+公開ポート: Kong 8000/8001, Keycloak 8080, quarkus-authz 8081, service-a 9081, service-b 9082
+
+以下だと一括デプロイ。
+```bash
+docker compose up -d --build 
+```
+
+---
+
+## Keycloak 設定（`demo-realm`）
+
+管理UI: `http://localhost:8080/`（Admin: `admin` / `admin`）
+
+### 1) Realm/ユーザー
+
+- **Realm**: `demo-realm`
+- **User**: `testuser`（Password=`password`, Temporary=OFF）
+
+### 2) Clients（3つ）
+
+- ``**（集約API）**
+
+  - Client type: OpenID Connect
+  - **Client authentication: ON（= Confidential）**
+  - Standard Flow: ON（Authorization Code）
+  - Direct Access Grants: 任意で ON（CLI 動作確認用）
+  - **Valid Redirect URIs**: `http://localhost:8000/*`, `http://quarkus-authz:8000/*`, `http://localhost:8081/*`
+  - Web Origins: `http://localhost:8000`, `http://localhost:8081`
+  - **Credentials > Secret** をコピーして、後述の Quarkus 設定へ
+
+- ``** / **``**（下流）**
+
+  - Access Type: **Bearer-only**（ログイン画面なし）
+
+### 3) Client Roles
+
+- `service-a`: `read`, `user`
+- `service-b`: `read`, `user`
+
+### 4) ユーザーへロール付与
+
+- `testuser` → Role Mapping → Client Roles → `service-a: read,user` / `service-b: read,user` を付与
+
+### 5) Audience（aud）に A/B を含める
+
+- `quarkus-client` → Client Scopes → Add Mapper → **Audience**
+  - Included Client Audience: `service-a`, `service-b`
+  - Add to access token: ON
+
+> これで access token に `aud: ["service-a","service-b", ...]` と `resource_access.service-a.roles / service-b.roles` が入ります。
+
+---
+
+## Kong ルーティング（素通し）
+
+認証は Quarkus に任せる。Kong はルートだけ作る。
+
+Admin API: `http://localhost:8001`
+
+# kong-deck.yamlを反映させる方法
+DB-LESSの場合は、'docker compose up -d --build'実行時に反映する設定（KONG_DECLARATIVE_CONFIG）になっているが、
+DBを利用する場合は、以下で適用する。
+```bash
+deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
+deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
+```
+
+# 手動で設定する場合
+
+## 1) Services（BFF と Frontend）
+
+```bash
+# === Quarkus BFF (API) ===
+curl -sS -X PUT http://localhost:8001/services/api-svc \
+  -d url=http://quarkus-authz:8080 \
+  -d tags[]=stack-multi-authn
+
+# === Vite Dev (Frontend) ===
+curl -sS -X PUT http://localhost:8001/services/frontend-dev \
+  -d url=http://frontend:5173 \
+  -d tags[]=stack-multi-authn
+```
+
+
+## 2) Routes（BFF 側ルート）
+
+```bash
+# /api → BFF。/api は剥がす（/api/* → /*）
+curl -sS -X PUT http://localhost:8001/routes/api-route \
+  -d service.name=api-svc \
+  -d paths[]=/api \
+  -d strip_path=true \
+  -d preserve_host=true \
+  -d path_handling=v0 \
+  -d tags[]=stack-multi-authn
+
+# OIDC コールバック (/login) は剥がさない
+curl -sS -X PUT http://localhost:8001/routes/login-route \
+  -d service.name=api-svc \
+  -d paths[]=/login \
+  -d strip_path=false \
+  -d preserve_host=true \
+  -d path_handling=v0 \
+  -d tags[]=stack-multi-authn
+
+# ログアウト (/logout) も剥がさない
+curl -sS -X PUT http://localhost:8001/routes/logout-route \
+  -d service.name=api-svc \
+  -d paths[]=/logout \
+  -d strip_path=false \
+  -d preserve_host=true \
+  -d path_handling=v0 \
+  -d tags[]=stack-multi-authn
+
+# /hello も BFF 直通・剥がさない
+curl -sS -X PUT http://localhost:8001/routes/hello-route \
+  -d service.name=api-svc \
+  -d paths[]=/hello \
+  -d strip_path=false \
+  -d preserve_host=true \
+  -d path_handling=v0 \
+  -d tags[]=stack-multi-authn
+
+# OIDC 開始の踏み台 (/secure) も剥がさない
+curl -sS -X PUT http://localhost:8001/routes/secure-route \
+  -d service.name=api-svc \
+  -d paths[]=/secure \
+  -d strip_path=false \
+  -d preserve_host=true \
+  -d path_handling=v0 \
+  -d tags[]=stack-multi-authn
+```
+
+## 3) Routes（Frontend 側ルート）
+
+```bash
+# /app と /app/ の両方を受ける（strip_path=false）。Vite dev では v1 が安心
+curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
+  -d service.name=frontend-dev \
+  -d paths[]=/app \
+  -d paths[]=/app/ \
+  -d strip_path=false \
+  -d preserve_host=true \
+  -d path_handling=v1 \
+  -d tags[]=stack-multi-authn
+```
+
+
+## 4) （任意）古いゴミの掃除
+
+以前の試行で残った重複ルート/サービスがあるなら削除しておくと安全です。
+
+```bash
+# 例：要らないルート名を列挙して消す
+for r in api-secure-route frontend-dev-svc frontend-dev-route-old mashup; do
+  curl -sS -X DELETE http://localhost:8001/routes/$r
+done
+
+# 例：使ってないサービスを消す
+for s in frontend-dev-svc mashup-svc authz-service frontend-svc; do
+  curl -sS -X DELETE http://localhost:8001/services/$s
+done
+```
+
+
+## 5) 動作確認
+
+```bash
+# ルート一覧
+curl -s http://localhost:8001/routes \
+  | jq '.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'
+
+# サービス一覧
+curl -s http://localhost:8001/services \
+  | jq '.data[] | {name, host, port, path}'
+
+# 実アクセス
+curl -i http://localhost:8000/hello
+curl -I http://localhost:8000/app/
+```
+
+> `strip_path=false` と `preserve_host=true` が重要。外向きホスト/パスを Quarkus に正しく伝える。
+
+---
+
+## アプリ固有のポイント（BFF / Frontend）
+
+### Quarkus（BFF）設定の要点
+
+`quarkus-authz/src/main/resources/application.properties`（抜粋）
+
+```properties
+# OIDC 基本設定
+quarkus.oidc.auth-server-url=http://keycloak:8080/realms/demo-realm
+quarkus.oidc.client-id=quarkus-client
+quarkus.oidc.credentials.client-secret.value=VJEng5YQw6dBE5mf6x5R2tFvU0KMg3KB
+quarkus.oidc.application-type=web-app
+quarkus.http.proxy.proxy-address-forwarding=true
+
+# OIDC コールバックを /login に固定（/app ではない）
+quarkus.oidc.authentication.redirect-path=/login
+# コールバック後は元URLへ戻さず、LoginResource 側で /app/ に送る
+quarkus.oidc.authentication.restore-path-after-redirect=false
+
+# PKCE & state 保護
+quarkus.oidc.authentication.pkce-required=true
+quarkus.oidc.authentication.state-secret=${STATE_SECRET:change-me-change-me-change-me-1234}
+
+# ログアウト
+quarkus.oidc.logout.path=/logout
+quarkus.oidc.logout.post-logout-path=/app/
+
+# そのほか（Redis セッション保持、トークン戦略など）はファイル参照
+```
+
+`LoginResource.java`（意図）
+
+* `GET /login`（PermitAll）
+  未ログインなら **`/secure` へ 302**、ログイン済みなら **`/app/` へ 302**
+* `GET /secure`（Authenticated）
+  OIDC のコードフローを開始 → 認証後は `/app/` に 302
+* `GET /logout`
+  セッション破棄 → `/app/` に 302
+
+### Frontend（Vite / React）
+
+`frontend/src/App.tsx`（抜粋）
+
+```tsx
+<button type="button" onClick={() => window.location.assign('/api/login')}>
+  ログイン
+</button>
+<button type="button" onClick={() => window.location.assign('/api/logout')}>
+  ログアウト
+</button>
+
+<button onClick={() => apiGet('/me')}>/api/me</button>
+<button onClick={() => apiGet('/mashup')}>/api/mashup</button>
+<a href="/app/" style={{ marginLeft: 8 }}>トップへ</a>
+```
+
+* \*\*ログイン/ログアウトはトップレベル遷移（`window.location.assign`）\*\*が必須
+* API は **`/api/*`** で BFF に到達
+
+
+## 下流サービス（A/B）設定
+
+`service-a` / `service-b` の `application.properties`:
+
+```properties
+quarkus.oidc.auth-server-url=http://keycloak:8080/realms/demo-realm
+quarkus.oidc.client-id=service-a   # service-b 側は service-b
+quarkus.oidc.application-type=service
+
+# アクセストークン内ロールを使用
+quarkus.oidc.roles.source=accesstoken
+quarkus.oidc.roles.role-claim-path=resource_access["service-a"].roles  # B は ["service-b"]
+```
+
+必要に応じてエンドポイントに `@RolesAllowed("read")` を付けて厳格化します。
+
+
+
+---
+
+## 動作確認
+
+1. `http://localhost:8000/app/` をブラウザで開く
+2. 「ログイン」を押下
+
+   * Keycloak ログイン画面 → 認証
+   * コールバック `/login` → BFF が `/app/` に戻す
+3. `/api/me` と `/api/mashup` が 200 で結果を返すこと
+4. 「ログアウト」→ `/app/` に戻り、`/api/me` が再びログインを促すこと
+
+5. CLI（直叩き）
+
+```bash
+# パスワードグラントでトークン取得（検証用）
+TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/demo-realm/protocol/openid-connect/token' \
+  -d 'grant_type=password' \
+  -d 'client_id=quarkus-client' \
+  -d 'username=testuser' \
+  -d 'password=password' | jq -r .access_token)
+
+# 集約APIへ
+curl -i http://localhost:8081/mashup -H "Authorization: Bearer $TOKEN"
+```
+
+期待レスポンス：
+
+```json
+{
+  "fromServiceA": { "message": "ok-from-A", "detail": "helloA" },
+  "fromServiceB": { "message": "ok-from-b", "detail": "helloB" }
+}
+```
+
+6. Redis でセッション確認
+
+```bash
+docker exec -it <redis-container> redis-cli
+127.0.0.1:6379> SCAN 0 MATCH * COUNT 100
+127.0.0.1:6379> TTL "oidc:token:..."   # 残存時間
+```
+
+
+---
+
+## よくあるハマりどころ
+
+* **`/login` で 404（Resource not found）**
+  → Kong の `login-route` が **`strip_path=false`** / `preserve_host=true` になっているか確認。
+  誤って `strip_path=true` だと BFF の `/login` まで届かず 404 になります。
+
+* **`State parameter can not be empty` のログ**
+  → `/login` を直接叩いた場合に出ることがある正常なログ。
+  ユーザの導線は `/api/login` → `/secure` → `/login` → `/app/` を想定。
+
+* **認証後に `/app/` へ戻らない**
+  → `quarkus.oidc.authentication.redirect-path=/login` と
+  `quarkus.oidc.authentication.restore-path-after-redirect=false` が一致しているか、
+  そして **`/login` が BFF へ到達**しているか（Kong ルート）を確認。
+
+* **`/secure` に他サービス向きのルートが残っている**
+  → 競合ルートの掃除スクリプトを実行して除去（上記参照）。
+
+* **Keycloak のロール / groups が期待通り出ない**
+  → `quarkus.oidc.roles.*` の設定や、Access Token に載るクレーム（`realm_access/roles` など）を確認。
+
+* **HTTPS/TLS 終端を入れた**
+  → Cookie の `Secure` / `SameSite` 設定を見直し。
+  `quarkus.oidc.authentication.cookie-force-secure=true` などを検討。
+
+
+
+---
+
+
+## トラブルシューティング & TIPS
+
+- **401 unauthorized\_client**: Keycloak の `quarkus-client` を **Confidential** に、Quarkus の `client-secret.value` と一致させる。
+- **リダイレクトURI不一致**: `http://localhost:8000/*`, `http://quarkus-authz:8000/*`, `http://localhost:8081/*` を Valid Redirect URIs に登録。
+- **Cookie が返らない/ループ**: 開発時に `cookie-force-secure=true` 有効だと HTTP では送れない。
+- **roles.source** は ``（ハイフン/アンダースコアなし）。
+- **aud が足りない**: Audience マッパーで `service-a` / `service-b` を access token に付与。
+- **大きいヘッダで 502**: `kong-nginx-http.conf` の `large_client_header_buffers` を調整。
+- **セッション全消し**: 検証時は Redis で `FLUSHDB`（本番は慎重に）。
+
+---
+
+
+## 参考：主要エンドポイント
+
+* フロント：`http://localhost:8000/app/`
+* API(BFF)：`http://localhost:8000/api/*`
+
+  * ログイン：`/api/login`（→ `/secure` → Keycloak → `/login` → `/app/`）
+  * ログアウト：`/api/logout`
+  * 認証ユーザ：`/api/me`
+  * マッシュアップ：`/api/mashup`
+* Keycloak：`http://localhost:8080/`（realm: `demo-realm`）
+* Konga（任意）：`http://localhost:1337/`
+
+---

@@ -1,0 +1,116 @@
+_format_version: "3.0"
+services:
+- connect_timeout: 60000
+  enabled: true
+  host: quarkus-authz
+  name: api-svc
+  port: 8080
+  protocol: http
+  read_timeout: 60000
+  retries: 5
+  routes:
+  - https_redirect_status_code: 426
+    name: api-route
+    path_handling: v0
+    paths:
+    - /api
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: true
+    tags:
+    - multi-authn
+  - https_redirect_status_code: 426
+    name: api-secure-route
+    path_handling: v0
+    paths:
+    - /api/secure
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: false
+    tags:
+    - multi-authn
+  - https_redirect_status_code: 426
+    name: login-route
+    path_handling: v0
+    paths:
+    - /login
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: false
+    tags:
+    - multi-authn
+  - https_redirect_status_code: 426
+    name: logout-route
+    path_handling: v0
+    paths:
+    - /logout
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: false
+    tags:
+    - multi-authn
+  - https_redirect_status_code: 426
+    name: secure-route
+    path_handling: v0
+    paths:
+    - /secure
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: false
+    tags:
+    - multi-authn
+  tags:
+  - multi-authn
+  write_timeout: 60000
+- connect_timeout: 60000
+  enabled: true
+  host: frontend
+  name: frontend-dev-svc
+  port: 5173
+  protocol: http
+  read_timeout: 60000
+  retries: 5
+  routes:
+  - https_redirect_status_code: 426
+    name: frontend-dev-route
+    path_handling: v1
+    paths:
+    - /app
+    preserve_host: true
+    protocols:
+    - http
+    - https
+    regex_priority: 0
+    request_buffering: true
+    response_buffering: true
+    strip_path: false
+    tags:
+    - multi-authn
+  tags:
+  - multi-authn
+  write_timeout: 60000

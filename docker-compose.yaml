@@ -1,20 +1,6 @@
 version: '3.8'
 
 services:
-  kong-database:
-    image: postgres:10  # ← バージョン10に変更
-    environment:
-      POSTGRES_USER: kong
-      POSTGRES_DB: kong
-      POSTGRES_PASSWORD: kong
-    volumes:
-      - kong_data:/var/lib/postgresql/data
-      - ./init-konga-db.sql:/docker-entrypoint-initdb.d/init-konga-db.sql
-
-  # redis:
-  #   image: redis:7
-  #   ports:
-  #     - "6379:6379"
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -24,56 +10,27 @@ services:
 
   kong:
     image: kong:3.6.0
-    depends_on:
-      - kong-database
     environment:
-      KONG_DATABASE: postgres
-      KONG_PG_HOST: kong-database
-      KONG_PG_USER: kong
-      KONG_PG_PASSWORD: kong
+      KONG_DATABASE: "off"   # ★ DB-LESS
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong-deck.yaml  # ★ ファイルを指す
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
       KONG_PLUGINS: bundled
-      # ← 追加：httpコンテキストにインクルード
       KONG_NGINX_HTTP_INCLUDE: /usr/local/kong/nginx-http.conf
     ports:
-      - "8000:8000"  # Proxy
-      - "8001:8001"  # Admin API
+      - "8000:8000"
+      - "8001:8001"
     command: ["kong", "docker-start"]
     volumes:
-      - ./kong-nginx-http.conf:/usr/local/kong/nginx-http.conf:ro
+      # ★★★ ここが“ファイル→ファイル”になっていることが超重要 ★★★
+      - ./kong/kong-deck.yaml:/usr/local/kong/declarative/kong-deck.yaml:ro
+      - ./kong/kong-nginx-http.conf:/usr/local/kong/nginx-http.conf:ro
 
-  konga:
-    image: pantsel/konga:latest
-    container_name: konga
-    restart: always
-    environment:
-      - NODE_ENV=development
-      #- NODE_ENV=production
-      - DB_ADAPTER=postgres
-      - DB_HOST=kong-database
-      - DB_USER=kong
-      - DB_PASSWORD=kong
-      - DB_DATABASE=konga
-    ports:
-      - "1337:1337"
-    depends_on:
-      - kong-database
-    
-  # keycloak:
-  #   image: quay.io/keycloak/keycloak:24.0
-  #   command: start-dev
-  #   environment:
-  #     KEYCLOAK_ADMIN: admin
-  #     KEYCLOAK_ADMIN_PASSWORD: admin
-  #   ports:
-  #     - "8080:8080"
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
-    # command: start-dev
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
@@ -83,32 +40,29 @@ services:
       KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8080"
-    ports:
-      - "8080:8080"
+    ports: ["8080:8080"]
     volumes:
-    - ./realms:/opt/keycloak/data/import:ro
+      - ./realms:/opt/keycloak/data/import:ro
     command:
       - start-dev
-      # - --hostname=keycloak
-      # - --http-enabled=true
-      # - --http-port=8080
-      # - --hostname-strict=false
-      # - --hostname-strict-https=false
       - --import-realm
-
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 10
 
   quarkus-authz:
     build:
       context: ./quarkus-authz
       dockerfile: Dockerfile
-    depends_on:
-      - redis
     environment:
       REDIS_HOST: redis
       QUARKUS_LOG_CATEGORY__IO_QUARKUS_OIDC__LEVEL: DEBUG
-    ports:
-      - "8081:8080"
-
+    depends_on:
+      - keycloak
+      - redis
+    ports: ["8081:8080"]
 
   service-a:
     build:
@@ -120,17 +74,13 @@ services:
       QUARKUS_OIDC_APPLICATION_TYPE: service
       QUARKUS_HTTP_AUTH_PERMISSION_PROTECTED_PATHS: /a/*
       QUARKUS_HTTP_AUTH_PERMISSION_PROTECTED_POLICY: authenticated
-
-      # トークンのロール情報を取得するための設定
       QUARKUS_OIDC_ROLES_SOURCE: accesstoken
-      # QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH: 'resource_access["service-a"].roles'
       QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH: resource_access/service-b/roles
-
-      # ← 追加：デバッグログ
       QUARKUS_LOG_LEVEL: INFO
       QUARKUS_LOG_CATEGORY__IO_QUARKUS_OIDC__LEVEL: DEBUG
       QUARKUS_LOG_CATEGORY__IO_QUARKUS_SECURITY__LEVEL: DEBUG
     ports: ["9081:8080"]
+    depends_on: [keycloak]
 
   service-b:
     build:
@@ -142,35 +92,21 @@ services:
       QUARKUS_OIDC_APPLICATION_TYPE: service
       QUARKUS_HTTP_AUTH_PERMISSION_PROTECTED_PATHS: /b/*
       QUARKUS_HTTP_AUTH_PERMISSION_PROTECTED_POLICY: authenticated
-
-      # トークンのロール情報を取得するための設定
       QUARKUS_OIDC_ROLES_SOURCE: accesstoken
-      # QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH: 'resource_access["service-b"].roles'
       QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH: resource_access/service-b/roles
-
-      # ← 追加：デバッグログ
       QUARKUS_LOG_LEVEL: INFO
       QUARKUS_LOG_CATEGORY__IO_QUARKUS_OIDC__LEVEL: DEBUG
       QUARKUS_LOG_CATEGORY__IO_QUARKUS_SECURITY__LEVEL: DEBUG
     ports: ["9082:8080"]
-
+    depends_on: [keycloak]
 
   frontend:
     image: node:20-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
-    # volumes:
-    #   - ./frontend:/app:cached
     volumes:
       - ./frontend:/app
-    ports:
-      - "5173:5173"   # 直接アクセスしたい場合に開放（任意）。Kong 経由なら必須ではありません。
+    ports: ["5173:5173"]
     environment:
-      - CHOKIDAR_USEPOLLING=true   # Docker 環境でのファイル監視安定化
+      - CHOKIDAR_USEPOLLING=true
     restart: unless-stopped
-    profiles: [dev]
-    # networks: [kong-net]  # 既存でカスタムネットワークを使っている場合はこちらに合わせてください
-
-
-volumes:
-  kong_data:

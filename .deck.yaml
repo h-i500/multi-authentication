@@ -1,0 +1,4 @@
+# decK の既定設定（プロジェクト専用タグだけを管理）
+kong-addr: http://localhost:8001
+select-tags:
+  - multi-authn
