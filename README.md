@@ -1,8 +1,3 @@
-最高です！リポジトリの“いま”の構成（Kong=DB-LESS、フロントは `/app`、BFF は `/api/*`、Keycloak/Redis あり）に合わせて、README.md を丸っと書き直しました。
-**DB-LESSを標準**にしつつ、**将来 DB モードへ切替えるときの注意点**と **deck/手動(curl) の手順**も残しています。
-
----
-
 # 多段認証・多段認可デモ
 
 **Quarkus (BFF/Aggregator) × Kong × Keycloak × Redis × React(Vite)**
@@ -12,14 +7,14 @@ BFF は **ユーザーのアクセストークンを下流へ転送** → **Serv
 
 * フロント：`/app/*`（Vite Dev Server）
 * BFF/API：`/api/*`（Quarkus）
-* OIDC コールバック：`/login`（BFFで受けて `/app/` に戻す）
-* セッション：Redis（Token State Manager）
+* OIDC コールバック：`/login`（BFF で受けて `/app/` に戻す）
+* セッション：Redis（OIDC Token State Manager）
 
 ---
 
 ## アーキテクチャ
 
-```
+```text
 [Browser]  http://localhost:8000
      |
      v
@@ -70,7 +65,7 @@ Konga(任意): http://localhost:1337
 
 ## セットアップ & 起動（DB-LESS：標準）
 
-> リポジトリは **DB-LESS モード**で起動しやすい `docker-compose.yaml` と
+> 本リポジトリは **DB-LESS モード**で起動しやすい `docker-compose.yaml` と
 > **宣言的設定** `kong/kong.yml` を同梱しています。
 
 ```bash
@@ -87,18 +82,39 @@ cd frontend      && npm ci            && cd ..
 docker compose up -d --build
 ```
 
-> ✅ 起動後：
-> `http://localhost:8000/app/` にアクセス → 「ログイン」ボタン → Keycloak ログイン → `/app/` に戻る →
-> 「/api/me」「/api/mashup」ボタンで BFF 経由の API を確認できます。
-> **権限不足**の場合、フロントは **「権限エラー：この操作を行う権限がありません。」** を表示します。
+### （参考）compose の Kong（DB-LESS）抜粋
+
+```yaml
+  kong:
+    image: kong:3.6.0
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_NGINX_HTTP_INCLUDE: /usr/local/kong/nginx-http.conf
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+      - ./kong/kong-nginx-http.conf:/usr/local/kong/nginx-http.conf:ro
+    ports: ["8000:8000","8001:8001"]
+```
+
+> ✅ 起動後：`http://localhost:8000/app/` にアクセス → 「ログイン」→ Keycloak 認証 → `/app/` へ戻る。
+> 「/api/me」「/api/mashup」ボタンで BFF 経由の API を確認。
+> **権限不足**の場合、フロントは **「権限エラー：この操作を行う権限がありません。」** と表示します。
+
+### 最短動作確認（CLI）
+
+```bash
+# Kong プロキシ経由の疎通
+curl -i http://localhost:8000/hello
+curl -I http://localhost:8000/app/
+```
 
 ---
 
 ## Kong（DB-LESS）宣言的設定
 
-Kong は DB-LESS で、`kong/kong.yml` が読み込まれます（compose で `KONG_DATABASE=off` / `KONG_DECLARATIVE_CONFIG` を指定）。
-
-`kong/kong.yml`（抜粋・実態はリポジトリ内を使用）
+Kong は DB-LESS で、`kong/kong.yml` が読み込まれます。
 
 ```yaml
 _format_version: "3.0"
@@ -184,7 +200,7 @@ curl -sS -X PUT http://localhost:8001/routes/api-route \
   -d service.name=api-svc -d paths[]=/api -d strip_path=true \
   -d preserve_host=true -d path_handling=v0
 
-# OIDC コールバックはそのまま渡す
+# OIDC コールバック等はそのまま渡す
 for p in login logout hello secure; do
   curl -sS -X PUT http://localhost:8001/routes/$p-route \
     -d service.name=api-svc -d paths[]=/$p \
@@ -195,7 +211,7 @@ done
 ### 3) Routes（フロント側）
 
 ```bash
-# /app と /app/ の両方を受ける。strip_path=false & v1
+# /app と /app/ の両方。strip_path=false & v1
 curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
   -d service.name=frontend-dev \
   -d paths[]=/app -d paths[]=/app/ \
@@ -222,7 +238,7 @@ DB モードに切替えるときは：
 
 * `KONG_DATABASE=postgres` を指定
 * `KONG_DECLARATIVE_CONFIG` は **外す**
-* 初回のみ **マイグレーション**が必要
+* 初回のみ **マイグレーション**
 
 ```bash
 # （DBモードのみ初回）
@@ -246,7 +262,7 @@ deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
 ## Keycloak（realm: `demo-realm`）
 
 `docker-compose.yaml` で `./realms/demo-realm.json` を **自動インポート**します。
-同 JSON にはユーザ例が含まれます：
+同 JSON にはユーザー例が含まれます：
 
 * `testuser`（パスワード `password`、A/B に `read`,`user` 付与）
 * `dummyuser`（パスワード `password`、`dummy`,`user` 付与）→ **A/B の `read` が無い**ため権限エラー確認に使えます
@@ -261,15 +277,11 @@ deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
 ### Quarkus（BFF）
 
 * OIDC Code Flow（`/login` で受け、認証後は `/app/` に戻す）
-
 * セッションは **Redis Token State Manager** を使用（Cookie は参照キーのみ）
-
 * **トークン転送**：BFF はログイン中の **AccessToken** を取り出して
   **下流クライアントに `Authorization: Bearer …` を手動で付与**（MicroProfile Rest Client）
-
 * **権限エラー整形**：下流が 401/403 の場合、BFF は **403** を返すようにハンドリング
   → フロントは「権限エラー」を表示
-
 * `/api/me` は **roles を集約して返却**（`realm_access.roles` + `resource_access.*.roles`）
 
 ### Frontend（Vite/React）
@@ -282,11 +294,11 @@ deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
 ## 動作確認手順
 
 1. `http://localhost:8000/app/`
-2. 「ログイン」→ `testuser/password` でログイン
-3. 「/api/me」→ `roles` に `read`,`user` が含まれること
+2. 「ログイン」→ `testuser/password`
+3. 「/api/me」→ `roles` に `read`,`user` があること
 4. 「/api/mashup」→ A/B の結果が返ること
-5. ログアウト → `dummyuser/password` でログイン
-6. 「/api/mashup」→ **権限エラー**（403）が表示されること
+5. ログアウト → `dummyuser/password`
+6. 「/api/mashup」→ **権限エラー（403）** が表示されること
 
 ---
 
@@ -294,19 +306,15 @@ deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
 
 * **`/app/` が 301 ループ**
   → フロントのルートを **`/app` と `/app/` の両方**登録、`strip_path=false`、`path_handling=v1`。
-
-* **Kong が起動時に `…/kong.yml: Is a directory`**
+* **Kong 起動時に `…/kong.yml: Is a directory`**
   → `KONG_DECLARATIVE_CONFIG` に **ファイル**をマウントしているか確認（ディレクトリ不可）。
-
-* **Keycloak 反応が遅く BFF が接続失敗**
+* **Keycloak が遅く BFF が接続失敗**
   → compose の `depends_on` と **healthcheck** を設定（本リポジトリは設定済み）。
-
-* **`/login` で 404**
+* **`/login` が 404**
   → `login-route` が **`strip_path=false`** で BFF に素通しされているか。
-
 * **roles が `/api/me` に出ない**
   → BFF は JWT から `realm_access.roles` と `resource_access.*.roles` を集約。
-  Keycloak 側で対象クライアントのロール付与/Token に `aud` が載っているか確認。
+  Keycloak 側で対象クライアントのロール付与 / Token に `aud` が載っているか確認。
 
 ---
 
@@ -316,19 +324,13 @@ deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
 * `kong/kong.yml` … DB-LESS の宣言的設定（Service/Route）
 * `kong/kong-deck.yaml` … **DB モード用**の deck 状態ファイル
 * `quarkus-authz/src/main/java/example/api/MeResource.java` … ユーザ情報（roles 集約）
-* `quarkus-authz/src/main/java/org/example/api/MashupResource.java` … 下流呼び出し & 401/403 → 403 整形
+* `quarkus-authz/src/main/java/org/example/api/MashupResource.java` … 下流呼び出し & 401/403→403 整形
 * `frontend/src/api.ts` … 401/403 を「権限エラー」にマップ
 * `frontend/vite.config.ts` … `base: '/app/'`
 
 ---
 
-## ライセンス
-
-本リポジトリ内のコードは学習目的のサンプルです。必要に応じてコピー/改変してご利用ください。
-
----
-
-## 付録：手元で Kong の状態を確認するワンライナー
+## 付録：Kong の状態を確認するワンライナー
 
 ```bash
 # Routes
@@ -340,12 +342,11 @@ curl -s http://localhost:8001/services \
   | jq '.data[] | {name, host, port, path}'
 ```
 
-
 ---
 
 ## 付録：Redis に保管されたセッション情報を確認する（開発時の手引き）
 
-BFF（Quarkus）は **Redis Token State Manager** でセッション相当のトークン状態を保存します（Cookie には参照キーのみ）。
+BFF（Quarkus）は **Redis Token State Manager** でセッション相当のトークン状態を保存します（Cookie は参照キーのみ）。
 開発時に中身や存続時間を確認したい場合は、以下の手順で Redis を操作します。
 
 > ⚠️本番では `KEYS *` や `MONITOR` は避けてください。**`SCAN` を使う**のが安全です。
@@ -354,62 +355,54 @@ BFF（Quarkus）は **Redis Token State Manager** でセッション相当のト
 ### 1) Redis CLI を開く
 
 ```bash
-# コンテナ上の redis-cli を開く
 docker compose exec redis redis-cli
 ```
 
 ### 2) キーを探す（SCAN 推奨）
 
-ログイン直後にセッション関連キーが作られます。キー名はバージョンで多少変わるため、**ワイルドカードで探す**のがコツです。
-
 ```text
-# まずは全体をざっと（開発専用）
 SCAN 0 MATCH * COUNT 100
-
-# よく使うパターン例（いずれかにヒットするはず）
 SCAN 0 MATCH *session* COUNT 100
 SCAN 0 MATCH *oidc*    COUNT 100
 SCAN 0 MATCH *token*   COUNT 100
 ```
 
-> ブラウザの Cookie にある **`q_session`** の値（`localhost:8000` ドメイン）を使うと特定が早いです。
-> Cookie 値の一部でマッチさせる例：`SCAN 0 MATCH *<q_sessionの値の先頭数文字>* COUNT 100`
+> ブラウザの Cookie にある **`q_session`** の値（`localhost:8000` ドメイン）の一部でマッチさせると特定が早いです：
+> `SCAN 0 MATCH *<q_sessionの値の先頭数文字>* COUNT 100`
 
 ### 3) キー内容と TTL を見る
 
-キーの **種類** によって読み方が異なります。`TYPE` で判定してから `GET`（string）または `HGETALL`（hash）を使います。
-
 ```text
-# 例：見つけたキーを K とする
 TYPE K
-TTL  K          # 残存秒数（例：1200秒 ≒ 20分）
+TTL  K
 
-# 文字列キーの場合
+# 文字列キー
 GET K
 
-# ハッシュキーの場合（フィールドと値の一覧）
+# ハッシュキー
 HGETALL K
 ```
 
-> 値は JSON かシリアライズ済みの文字列です。`GET` の表示をそのまま参考にし、意味が分かりにくい場合は **TTL** で寿命だけ確認するのが手堅いです。
-
-### 4) 特定セッションだけ削除（開発時の再現用）
+### 4) 特定セッションだけ削除（再現用）
 
 ```text
 DEL K
 ```
 
-> ログアウトや消し込みの再現をしたい時に便利です。
-
 ### 5) すべてのセッションを消す（開発専用）
 
 ```text
-FLUSHDB     # 現在のDBを全消去（開発専用）
-# もしくは
-FLUSHALL    # すべてのDBを全消去（要注意）
+FLUSHDB     # 現在のDBを全消去
+# または
+FLUSHALL    # 全DBを全消去（要注意）
 ```
 
-> Compose の `redis` は `./data/redis` を永続化しています。完全にリセットしたいときは
-> コンテナ停止後にそのディレクトリを削除する方法でも初期化できます。
+> `./data/redis` をボリューム永続化している場合、完全リセットはコンテナ停止後にそのディレクトリ削除でも可。
+
+---
+
+## ライセンス
+
+本リポジトリ内のコードは学習目的のサンプルです。必要に応じてコピー/改変してご利用ください。
 
 ---
