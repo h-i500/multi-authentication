@@ -76,6 +76,12 @@
       <artifactId>quarkus-oidc-redis-token-state-manager</artifactId>
     </dependency>
 
+    <!-- 必要なら Redis クライアント（デフォルトデータソース設定用）-->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-redis-client</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>

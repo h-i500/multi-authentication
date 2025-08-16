@@ -1,10 +1,12 @@
-org\example\MashupResource.class
 org\example\HelloResource.class
 org\example\MashupTenantResolver.class
-org\example\MashupResource$MashupResult.class
-org\example\ServiceBClient.class
+org\example\LoginResource.class
 org\example\MashupResource$ServiceBResponse.class
 org\example\AuthzResource.class
 org\example\MashupResource$ServiceAResponse.class
+org\example\MashupResource.class
+example\api\MeResource.class
+org\example\MashupResource$MashupResult.class
+org\example\ServiceBClient.class
 org\example\AuthzRequest.class
 org\example\ServiceAClient.class
