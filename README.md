@@ -1,8 +1,3 @@
-以下をそのまま `README.md` に置き換えてください。
-（DB モード / DB-less、deck / curl、フロントの挙動、Keycloak 設定、トラブル対応まで一通り入れました。）
-
----
-
 # 多段認証・多段認可デモ
 
 **Quarkus × Kong × Keycloak × Redis × React(Vite)**
