@@ -365,319 +365,374 @@ code {
           : 'default'
     });
   </script>
+<p>最高です！リポジトリの“いま”の構成（Kong=DB-LESS、フロントは <code>/app</code>、BFF は <code>/api/*</code>、Keycloak/Redis あり）に合わせて、README.md を丸っと書き直しました。
+<strong>DB-LESSを標準</strong>にしつつ、<strong>将来 DB モードへ切替えるときの注意点</strong>と <strong>deck/手動(curl) の手順</strong>も残しています。</p>
+<hr>
 <h1 id="%E5%A4%9A%E6%AE%B5%E8%AA%8D%E8%A8%BC%E3%83%BB%E5%A4%9A%E6%AE%B5%E8%AA%8D%E5%8F%AF%E3%83%87%E3%83%A2">多段認証・多段認可デモ</h1>
-<p><strong>Quarkus × Kong × Keycloak × Redis × React(Vite)</strong></p>
-<p>ユーザー → <strong>Kong</strong> → <strong>Quarkus(BFF/Aggregator)</strong> で OIDC ログイン（セッションは <strong>Redis</strong>）。
-Quarkus はユーザーの <strong>Access Token</strong> を <strong>Service A/B</strong> に転送し、それぞれの認可ポリシーで判定 → 結果をマージして返します。</p>
+<p><strong>Quarkus (BFF/Aggregator) × Kong × Keycloak × Redis × React(Vite)</strong></p>
+<p>ユーザー → <strong>Kong</strong> → <strong>Quarkus(BFF)</strong> で OIDC ログイン（セッションは <strong>Redis</strong>） →
+BFF は <strong>ユーザーのアクセストークンを下流へ転送</strong> → <strong>Service A/B</strong> がそれぞれ認可判定 → 結果をマージして返す構成です。</p>
 <ul>
-<li>Kong がフロントの<strong>ルーティング</strong>を担当（<code>/app</code> は Frontend、<code>/api/*</code> は BFF）。</li>
-<li>OIDC コールバックは <strong><code>/login</code></strong> に固定し、BFF 側で最終的に <strong><code>/app/</code></strong> に戻します。</li>
-<li>フロント（React + Vite dev）は「ログイン」「/api/me」「/api/mashup」などを操作できます。</li>
+<li>フロント：<code>/app/*</code>（Vite Dev Server）</li>
+<li>BFF/API：<code>/api/*</code>（Quarkus）</li>
+<li>OIDC コールバック：<code>/login</code>（BFFで受けて <code>/app/</code> に戻す）</li>
+<li>セッション：Redis（Token State Manager）</li>
 </ul>
 <hr>
 <h2 id="%E3%82%A2%E3%83%BC%E3%82%AD%E3%83%86%E3%82%AF%E3%83%81%E3%83%A3">アーキテクチャ</h2>
 <pre class="hljs"><code><div>[Browser]  http://localhost:8000
-   |  /app,/app/                          | /api/*, /login, /secure, /logout, /hello
-   v                                      v
-+------------------+                 +------------------+
-|  Frontend(Vite)  |                 |  Quarkus BFF     |
-|  http://frontend:5173              |  http://quarkus-authz:8080
-+------------------+                 +---------+--------+
-                                              |
-                               (Bearer)       |  /a/*, /b/*
-                                              v
-                                   +----------+---------+
-                                   |   Service A / B    |
-                                   +--------------------+
+     |
+     v
++------------------+           Kong (proxy:8000, admin:8001)
+|       Kong       |
++------------------+
+   | /app/*                            | /api/*, /login, /secure, /logout, /hello
+   v                                    v
++---------------------+             +---------------------+
+|  frontend (Vite)    |             |  Quarkus BFF (8080) |
+|  http://frontend:5173             |  http://quarkus-authz:8080
++---------------------+             +----------+----------+
+                                               |
+                               (Bearer)        |   /a/*, /b/*
+                                               v
+                                     +---------+---------+
+                                     |  service-a / -b   |
+                                     +-------------------+
 
-Kong:     proxy :8000, admin :8001
-Keycloak: http://keycloak:8080 (realm: demo-realm)  ※realms/から自動import
-Redis:    OIDC セッション保持
+Keycloak: http://keycloak:8080 (realm: demo-realm)
+Redis:    OIDC Token State を外だし
+Konga(任意): http://localhost:1337
 </div></code></pre>
-<hr>
-<h2 id="%E5%89%8D%E6%8F%90">前提</h2>
-<ul>
-<li>JDK 17、Maven</li>
-<li>Docker / Docker Compose</li>
-<li>Node.js 18+（推奨 20）/ npm（nvm 推奨）</li>
-<li><code>jq</code>（確認に便利）</li>
-<li><code>deck</code> 1.36+（Kong 設定の宣言的適用に使用）</li>
-</ul>
-<hr>
-<h2 id="%E3%83%AA%E3%83%9D%E3%82%B8%E3%83%88%E3%83%AA">リポジトリ</h2>
-<pre class="hljs"><code><div>git <span class="hljs-built_in">clone</span> https://github.com/h-i500/multi-authentication.git
-<span class="hljs-built_in">cd</span> multi-authentication
-</div></code></pre>
-<p>主要構成（抜粋）:</p>
-<pre class="hljs"><code><div>multi-authentication/
-├─ docker-compose.yaml
-├─ kong/
-│  ├─ kong.yml             # DB-less 起動で読み込まれる宣言的設定（KONG_DECLARATIVE_CONFIG）
-│  ├─ kong-deck.yaml       # deck 用 state（DB/DB-less 双方に適用可能）
-│  └─ kong-nginx-http.conf # 追加の nginx http コンテキスト（大きめヘッダなどの調整）
-├─ realms/                 # Keycloak の realm 定義（自動 import）
-├─ frontend/               # Vite + React (base=/app/)
-│  ├─ vite.config.ts       # base: '/app/'
-│  └─ src/App.tsx          # /api/login, /api/logout, /api/me, /api/mashup
-├─ quarkus-authz/          # BFF (OIDC web-app + Redis セッション)
-└─ service-a, service-b    # 下流サービス (Bearer)
-</div></code></pre>
-<hr>
-<h2 id="%E3%83%93%E3%83%AB%E3%83%89%E5%88%9D%E5%9B%9E%E5%A4%89%E6%9B%B4%E6%99%82">ビルド（初回/変更時）</h2>
-<pre class="hljs"><code><div><span class="hljs-built_in">cd</span> quarkus-authz &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
-<span class="hljs-built_in">cd</span> service<span class="hljs-_">-a</span>     &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
-<span class="hljs-built_in">cd</span> service-b     &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
-<span class="hljs-built_in">cd</span> frontend      &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; <span class="hljs-built_in">cd</span> ..
-</div></code></pre>
-<hr>
-<h2 id="%E8%B5%B7%E5%8B%95%E3%83%87%E3%83%95%E3%82%A9%E3%83%AB%E3%83%88kong-%E3%81%AF-db-less">起動（デフォルト：<strong>Kong は DB-less</strong>）</h2>
-<p><code>docker-compose.yaml</code> は <strong>DB-less</strong> 起動向けです。Kong は <code>kong/kong.yml</code> を読み込みます。</p>
-<pre class="hljs"><code><div>docker compose up -d --build
-</div></code></pre>
-<p>公開ポート</p>
-<ul>
-<li>Kong 8000/8001, Keycloak 8080, Frontend 5173（任意公開）, Quarkus(BFF) 8081（ホスト公開）</li>
-</ul>
-<blockquote>
-<p><strong>注意（DB-less）</strong>
-<code>KONG_DECLARATIVE_CONFIG</code> は <strong>ファイルパス</strong> を指します。
-ディレクトリをマウントすると「<code>.../kong.yml: Is a directory</code>」エラーで起動しません。</p>
-</blockquote>
-<hr>
-<h2 id="%E4%BD%BF%E3%81%84%E6%96%B9%E3%83%96%E3%83%A9%E3%82%A6%E3%82%B6">使い方（ブラウザ）</h2>
-<ol>
-<li><code>http://localhost:8000/app/</code> を開く</li>
-<li>「ログイン」 → Keycloak 認証 → BFF が <code>/app/</code> に戻す</li>
-<li><code>/api/me</code> と <code>/api/mashup</code> が 200 で返ってくるのを確認</li>
-<li>「ログアウト」 → <code>/app/</code> に戻る（再び <code>/api/me</code> で未認証に）</li>
-</ol>
-<hr>
-<h2 id="kong-%E8%A8%AD%E5%AE%9A%E3%81%AE%E6%9B%B4%E6%96%B0%E6%96%B9%E6%B3%95">Kong 設定の更新方法</h2>
-<h3 id="db-less%E6%8E%A8%E5%A5%A8%E3%81%AE%E7%B0%A1%E5%8D%98%E6%89%8B%E9%A0%86">DB-less（推奨の簡単手順）</h3>
-<ul>
-<li><code>kong/kong.yml</code> を編集 → <strong>Kong 再起動</strong>（または <code>POST /config</code>）で反映</li>
-<li>もしくは deck で現在実体と差分/反映も可能（DB-less でも Admin API 経由で適用できます）</li>
-</ul>
-<pre class="hljs"><code><div><span class="hljs-comment"># 差分確認</span>
-deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
-
-<span class="hljs-comment"># 反映（DB-lessでも使用可：メモリへ適用）</span>
-deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
-</div></code></pre>
-<blockquote>
-<p>DB-less で deck による適用を行った場合、その内容は**揮発（再起動で消える）**です。
-永続させたい設定は <code>kong/kong.yml</code> にも反映しておきましょう。
-（例：<code>deck gateway dump &gt; kong/kong.yml</code> で現在の実体を落として保存）</p>
-</blockquote>
-<h3 id="db-%E3%83%A2%E3%83%BC%E3%83%89%E3%81%A7%E5%8B%95%E3%81%8B%E3%81%99%E5%A0%B4%E5%90%88%E5%B0%86%E6%9D%A5%E7%94%A8%E3%81%AE%E3%83%A1%E3%83%A2">DB モードで動かす場合（将来用のメモ）</h3>
-<p>DB モードに切り替えると Kong の設定は Postgres に永続化されます。
-<code>docker-compose.yaml</code> の <code>kong</code> サービスを DB モード用に戻し、以下を実施します。</p>
-<pre class="hljs"><code><div><span class="hljs-comment"># （DBモードのみ初回）Kong DB マイグレーション</span>
-docker compose run --rm kong kong migrations bootstrap
-
-<span class="hljs-comment"># deck で反映（DBモード推奨の適用方法）</span>
-deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
-deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
-</div></code></pre>
-<blockquote>
-<p><strong>DB モードの注意点</strong></p>
-<ul>
-<li>Postgres には **Kong の全エンティティ（services/routes/plugins/consumers など）**が格納されます。</li>
-<li>Konga を使う場合は、Konga 用 DB も必要です（同一 Postgres サーバ内の別 DB で運用可）。</li>
-<li>DB から DB-less へ切り替えるときは、<code>deck gateway dump &gt; kong/kong.yml</code> で宣言ファイルを書き出してから移行すると安全です。</li>
-</ul>
-</blockquote>
-<hr>
-<h2 id="kong-%E3%81%AE%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9%E3%83%AB%E3%83%BC%E3%83%88%E3%82%92-%E6%89%8B%E5%8B%95curl%E3%81%A7%E4%BD%9C%E3%82%8Bidempotent">Kong のサービス/ルートを **手動（curl）**で作る（idempotent）</h2>
-<blockquote>
-<p>すでに <code>kong/kong.yml</code> や <code>kong-deck.yaml</code> に同等の定義が入っています。
-手で作りたい/検証したい場合は以下を流せば同じ状態になります。</p>
-</blockquote>
-<p><strong>Services</strong></p>
-<pre class="hljs"><code><div><span class="hljs-comment"># Quarkus BFF (API)</span>
-curl -sS -X PUT http://localhost:8001/services/api-svc \
-  -d url=http://quarkus-authz:8080 \
-  -d tags[]=stack-multi-authn
-
-<span class="hljs-comment"># Frontend (Vite dev)</span>
-curl -sS -X PUT http://localhost:8001/services/frontend-dev \
-  -d url=http://frontend:5173 \
-  -d tags[]=stack-multi-authn
-</div></code></pre>
-<p><strong>Routes（BFF 側）</strong></p>
-<pre class="hljs"><code><div><span class="hljs-comment"># /api → BFF。/api は剥がす（/api/* → /*）</span>
-curl -sS -X PUT http://localhost:8001/routes/api-route \
-  -d service.name=api-svc \
-  -d paths[]=/api \
-  -d strip_path=<span class="hljs-literal">true</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-<span class="hljs-comment"># /login（OIDC コールバック）は剥がさない</span>
-curl -sS -X PUT http://localhost:8001/routes/login-route \
-  -d service.name=api-svc \
-  -d paths[]=/login \
-  -d strip_path=<span class="hljs-literal">false</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-<span class="hljs-comment"># /logout も剥がさない</span>
-curl -sS -X PUT http://localhost:8001/routes/<span class="hljs-built_in">logout</span>-route \
-  -d service.name=api-svc \
-  -d paths[]=/<span class="hljs-built_in">logout</span> \
-  -d strip_path=<span class="hljs-literal">false</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-<span class="hljs-comment"># /hello も剥がさない（BFF 直通）</span>
-curl -sS -X PUT http://localhost:8001/routes/hello-route \
-  -d service.name=api-svc \
-  -d paths[]=/hello \
-  -d strip_path=<span class="hljs-literal">false</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-<span class="hljs-comment"># /secure（OIDC 開始の踏み台）も剥がさない</span>
-curl -sS -X PUT http://localhost:8001/routes/secure-route \
-  -d service.name=api-svc \
-  -d paths[]=/secure \
-  -d strip_path=<span class="hljs-literal">false</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-</div></code></pre>
-<p><strong>Routes（Frontend 側）</strong></p>
-<pre class="hljs"><code><div><span class="hljs-comment"># /app と /app/ の両方を Frontend へ。Vite dev は strip_path=false &amp; path_handling=v1 が安全</span>
-curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
-  -d service.name=frontend-dev \
-  -d paths[]=/app \
-  -d paths[]=/app/ \
-  -d strip_path=<span class="hljs-literal">false</span> \
-  -d preserve_host=<span class="hljs-literal">true</span> \
-  -d path_handling=v1 \
-  -d tags[]=stack-multi-authn
-</div></code></pre>
-<p><strong>確認</strong></p>
-<pre class="hljs"><code><div>curl -s http://localhost:8001/services | jq <span class="hljs-string">'.data[] | {name, host, port, path}'</span>
-curl -s http://localhost:8001/routes    | jq <span class="hljs-string">'.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'</span>
-
-curl -i http://localhost:8000/hello
-curl -I http://localhost:8000/app/
-</div></code></pre>
-<blockquote>
-<p><code>/app</code> と <code>/app/</code> を<strong>両方</strong>作る &amp; <code>strip_path=false</code>、<code>path_handling=v1</code> が Vite dev では重要（301 ループ/アセット 404 を防止）。
-<code>preserve_host=true</code> は外向きホスト/パス情報を BFF/Frontend に正しく伝えるのに有効です。</p>
-</blockquote>
-<hr>
-<h2 id="keycloakdemo-realm">Keycloak（demo-realm）</h2>
-<ul>
-<li>管理 UI: <code>http://localhost:8080/</code>（Admin: <code>admin</code> / <code>admin</code>）</li>
-<li>realm は <code>realms/</code> から<strong>自動インポート</strong></li>
-</ul>
-<p>代表的なクライアント設定</p>
-<ul>
-<li><code>quarkus-client</code>（BFF 用）: OIDC/Confidential、Authorization Code、Valid Redirect URIs に
-<code>http://localhost:8000/*</code>、<code>http://localhost:8081/*</code> 等、Web Origins は <code>http://localhost:8000</code>, <code>http://localhost:8081</code>。
-Credentials の <strong>Secret</strong> を BFF に設定。</li>
-<li><code>service-a</code> / <code>service-b</code>（下流）: Bearer-only</li>
-</ul>
-<p>ロール &amp; Audience</p>
-<ul>
-<li><code>service-a</code>: <code>read</code>, <code>user</code> / <code>service-b</code>: <code>read</code>, <code>user</code> を <code>testuser</code> に付与</li>
-<li><code>quarkus-client</code> に Audience マッパーで <code>service-a</code> と <code>service-b</code> を <code>aud</code> に含める</li>
-</ul>
-<hr>
-<h2 id="bffquarkus%E3%81%AE%E8%A6%81%E7%82%B9">BFF（Quarkus）の要点</h2>
-<p><code>quarkus-authz/src/main/resources/application.properties</code>（抜粋）</p>
-<pre class="hljs"><code><div><span class="hljs-comment"># OIDC</span>
-<span class="hljs-meta">quarkus.oidc.auth-server-url</span>=<span class="hljs-string">http://keycloak:8080/realms/demo-realm</span>
-<span class="hljs-meta">quarkus.oidc.client-id</span>=<span class="hljs-string">quarkus-client</span>
-<span class="hljs-meta">quarkus.oidc.credentials.client-secret.value</span>=<span class="hljs-string">...   # Keycloak の Secret</span>
-<span class="hljs-meta">quarkus.oidc.application-type</span>=<span class="hljs-string">web-app</span>
-<span class="hljs-meta">quarkus.http.proxy.proxy-address-forwarding</span>=<span class="hljs-string">true</span>
-<span class="hljs-comment">
-# コールバックを /login に固定し、戻り先はアプリ側で制御</span>
-<span class="hljs-meta">quarkus.oidc.authentication.redirect-path</span>=<span class="hljs-string">/login</span>
-<span class="hljs-meta">quarkus.oidc.authentication.restore-path-after-redirect</span>=<span class="hljs-string">false</span>
-<span class="hljs-comment">
-# PKCE / state</span>
-<span class="hljs-meta">quarkus.oidc.authentication.pkce-required</span>=<span class="hljs-string">true</span>
-<span class="hljs-meta">quarkus.oidc.authentication.state-secret</span>=<span class="hljs-string">${STATE_SECRET:change-me-change-me-change-me-1234}</span>
-<span class="hljs-comment">
-# Redis セッション</span>
-<span class="hljs-meta">quarkus.redis.hosts</span>=<span class="hljs-string">redis://redis:6379</span>
-<span class="hljs-meta">quarkus.oidc.token-state-manager.strategy</span>=<span class="hljs-string">keep-all-tokens</span>
-<span class="hljs-comment"># 必要なら分割:</span>
-<span class="hljs-comment"># quarkus.oidc.token-state-manager.split-tokens=true</span>
-<span class="hljs-comment">
-# API 保護の例</span>
-<span class="hljs-meta">quarkus.http.auth.permission.authenticated.paths</span>=<span class="hljs-string">/api/*</span>
-<span class="hljs-meta">quarkus.http.auth.permission.authenticated.policy</span>=<span class="hljs-string">authenticated</span>
-</div></code></pre>
-<p><code>LoginResource</code> の役割：</p>
-<ul>
-<li><code>GET /login</code>（PermitAll）: 未ログイン→<code>/secure</code> に 302、ログイン済→<code>/app/</code> に 302</li>
-<li><code>GET /secure</code>（Authenticated）: OIDC 開始 → 認証後 <code>/app/</code></li>
-<li><code>GET /logout</code>: セッション破棄 → <code>/app/</code></li>
-</ul>
-<h2 id="redis-%E3%81%A7%E3%82%BB%E3%83%83%E3%82%B7%E3%83%A7%E3%83%B3%E7%A2%BA%E8%AA%8D">Redis でセッション確認</h2>
-<pre class="hljs"><code><div>docker <span class="hljs-built_in">exec</span> -it &lt;redis-container&gt; redis-cli
-127.0.0.1:6379&gt; SCAN 0 MATCH * COUNT 100
-127.0.0.1:6379&gt; TTL <span class="hljs-string">"oidc:token:..."</span>   <span class="hljs-comment"># 残存時間</span>
-</div></code></pre>
-<hr>
-<h2 id="%E4%B8%8B%E6%B5%81%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9ab%E3%81%AE%E8%A6%81%E7%82%B9">下流サービス（A/B）の要点</h2>
-<pre class="hljs"><code><div><span class="hljs-comment"># 共通</span>
-<span class="hljs-meta">quarkus.oidc.auth-server-url</span>=<span class="hljs-string">http://keycloak:8080/realms/demo-realm</span>
-<span class="hljs-meta">quarkus.oidc.application-type</span>=<span class="hljs-string">service</span>
-<span class="hljs-meta">quarkus.oidc.roles.source</span>=<span class="hljs-string">accesstoken</span>
-<span class="hljs-comment">
-# service-a:</span>
-<span class="hljs-meta">quarkus.oidc.client-id</span>=<span class="hljs-string">service-a</span>
-<span class="hljs-meta">quarkus.oidc.roles.role-claim-path</span>=<span class="hljs-string">resource_access["service-a"].roles</span>
-<span class="hljs-comment">
-# service-b:</span>
-<span class="hljs-meta">quarkus.oidc.client-id</span>=<span class="hljs-string">service-b</span>
-<span class="hljs-meta">quarkus.oidc.roles.role-claim-path</span>=<span class="hljs-string">resource_access["service-b"].roles</span>
-</div></code></pre>
-<hr>
-<h2 id="%E3%82%88%E3%81%8F%E3%81%82%E3%82%8B%E3%83%8F%E3%83%9E%E3%82%8A%E3%81%A9%E3%81%93%E3%82%8D">よくあるハマりどころ</h2>
-<ul>
-<li><strong>/app が 301 ループ/アセット 404</strong>
-→ Kong で <code>/app</code> と <code>/app/</code> の<strong>両方</strong>をルート登録、<code>strip_path=false</code>、<code>path_handling=v1</code>。
-→ Vite の <code>base='/app/'</code> を確認。</li>
-<li><strong>/login が 404</strong>
-→ <code>login-route</code> が <code>strip_path=false</code> か確認。剥がしてしまうと BFF の <code>/login</code> に届かず 404。</li>
-<li><strong>「State parameter can not be empty」ログ</strong>
-→ <code>/login</code> を直接開いた直後などに見えることがあります（導線として <code>/secure</code> 経由で問題なし）。</li>
-<li><strong>Keycloak 未起動 / 起動待ち不足</strong>
-→ Compose の <code>healthcheck</code> を入れるか、起動順に注意。</li>
-<li><strong>DB-less で起動しない</strong>
-→ <code>KONG_DECLARATIVE_CONFIG</code> が<strong>ファイル</strong>を指しているか確認（ディレクトリは不可）。</li>
-</ul>
 <hr>
 <h2 id="%E4%B8%BB%E8%A6%81%E3%82%A8%E3%83%B3%E3%83%89%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88">主要エンドポイント</h2>
 <ul>
 <li>
-<p>Frontend: <code>http://localhost:8000/app/</code></p>
+<p>フロント：<code>http://localhost:8000/app/</code></p>
 </li>
 <li>
-<p>API(BFF): <code>http://localhost:8000/api/*</code></p>
+<p>API(BFF)：<code>http://localhost:8000/api/*</code></p>
 <ul>
-<li>ログイン: <code>/api/login</code>（→ <code>/secure</code> → Keycloak → <code>/login</code> → <code>/app/</code>）</li>
-<li>ログアウト: <code>/api/logout</code></li>
-<li>認証ユーザ: <code>/api/me</code></li>
-<li>マッシュアップ: <code>/api/mashup</code></li>
+<li>ログイン：<code>/api/login</code> →（Kong/BFF）→ <code>/secure</code> →（Keycloak）→ <code>/login</code> → <code>/app/</code></li>
+<li>ログアウト：<code>/api/logout</code></li>
+<li>認証ユーザ：<code>/api/me</code></li>
+<li>マッシュアップ：<code>/api/mashup</code></li>
 </ul>
 </li>
 <li>
-<p>Keycloak: <code>http://localhost:8080/</code>（realm: <code>demo-realm</code>）</p>
+<p>Keycloak：<code>http://localhost:8080/</code>（realm: <code>demo-realm</code>）</p>
+</li>
+<li>
+<p>Konga（任意）：<code>http://localhost:1337/</code></p>
 </li>
 </ul>
+<hr>
+<h2 id="%E5%89%8D%E6%8F%90">前提</h2>
+<ul>
+<li>JDK 17、Maven、Docker / Docker Compose、Node.js (18+)</li>
+<li><code>jq</code>（Kong の確認で便利）</li>
+<li>deck（DB モードで使うと便利）：<a href="https://github.com/kong/deck/releases">https://github.com/kong/deck/releases</a></li>
+</ul>
+<hr>
+<h2 id="%E3%82%BB%E3%83%83%E3%83%88%E3%82%A2%E3%83%83%E3%83%97--%E8%B5%B7%E5%8B%95db-less%E6%A8%99%E6%BA%96">セットアップ &amp; 起動（DB-LESS：標準）</h2>
+<blockquote>
+<p>リポジトリは <strong>DB-LESS モード</strong>で起動しやすい <code>docker-compose.yaml</code> と
+<strong>宣言的設定</strong> <code>kong/kong.yml</code> を同梱しています。</p>
+</blockquote>
+<pre class="hljs"><code><div>git <span class="hljs-built_in">clone</span> https://github.com/h-i500/multi-authentication.git
+<span class="hljs-built_in">cd</span> multi-authentication
+
+<span class="hljs-comment"># アプリをビルド</span>
+<span class="hljs-built_in">cd</span> quarkus-authz &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
+<span class="hljs-built_in">cd</span> service<span class="hljs-_">-a</span>     &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
+<span class="hljs-built_in">cd</span> service-b     &amp;&amp; mvn clean package &amp;&amp; <span class="hljs-built_in">cd</span> ..
+<span class="hljs-built_in">cd</span> frontend      &amp;&amp; npm ci            &amp;&amp; <span class="hljs-built_in">cd</span> ..
+
+<span class="hljs-comment"># 全体を起動</span>
+docker compose up -d --build
+</div></code></pre>
+<blockquote>
+<p>✅ 起動後：
+<code>http://localhost:8000/app/</code> にアクセス → 「ログイン」ボタン → Keycloak ログイン → <code>/app/</code> に戻る →
+「/api/me」「/api/mashup」ボタンで BFF 経由の API を確認できます。
+<strong>権限不足</strong>の場合、フロントは <strong>「権限エラー：この操作を行う権限がありません。」</strong> を表示します。</p>
+</blockquote>
+<hr>
+<h2 id="kongdb-less%E5%AE%A3%E8%A8%80%E7%9A%84%E8%A8%AD%E5%AE%9A">Kong（DB-LESS）宣言的設定</h2>
+<p>Kong は DB-LESS で、<code>kong/kong.yml</code> が読み込まれます（compose で <code>KONG_DATABASE=off</code> / <code>KONG_DECLARATIVE_CONFIG</code> を指定）。</p>
+<p><code>kong/kong.yml</code>（抜粋・実態はリポジトリ内を使用）</p>
+<pre class="hljs"><code><div><span class="hljs-attr">_format_version:</span> <span class="hljs-string">"3.0"</span>
+<span class="hljs-attr">_transform:</span> <span class="hljs-literal">true</span>
+
+<span class="hljs-attr">services:</span>
+  <span class="hljs-comment"># === Quarkus BFF (API) ===</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">api-svc</span>
+    <span class="hljs-attr">host:</span> <span class="hljs-string">quarkus-authz</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">8080</span>
+    <span class="hljs-attr">protocol:</span> <span class="hljs-string">http</span>
+    <span class="hljs-attr">routes:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">api-route</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/api"]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v0</span>
+
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">login-route</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/login"]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">false</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v0</span>
+
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">logout-route</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/logout"]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">false</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v0</span>
+
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">hello-route</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/hello"]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">false</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v0</span>
+
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">secure-route</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/secure"]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">false</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v0</span>
+
+  <span class="hljs-comment"># === Vite Dev Server (Frontend) ===</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">frontend-dev</span>
+    <span class="hljs-attr">host:</span> <span class="hljs-string">frontend</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">5173</span>
+    <span class="hljs-attr">protocol:</span> <span class="hljs-string">http</span>
+    <span class="hljs-attr">routes:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">frontend-dev-route</span>
+        <span class="hljs-comment"># 301/ループ回避のため "/app" と "/app/" の両方</span>
+        <span class="hljs-attr">paths:</span> <span class="hljs-string">["/app",</span> <span class="hljs-string">"/app/"</span><span class="hljs-string">]</span>
+        <span class="hljs-attr">strip_path:</span> <span class="hljs-literal">false</span>
+        <span class="hljs-attr">preserve_host:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-attr">path_handling:</span> <span class="hljs-string">v1</span>
+</div></code></pre>
+<blockquote>
+<p>⚠️ <strong>ありがちなミス</strong>：<code>KONG_DECLARATIVE_CONFIG</code> に <strong>ディレクトリ</strong>をマウントすると
+「<code>…/kong.yml: Is a directory</code>」で起動失敗します。<strong>ファイル</strong>をマウントしてください。</p>
+</blockquote>
+<hr>
+<h2 id="%E5%8F%82%E8%80%83kong-%E3%82%92-%E6%89%8B%E5%8B%95curl-%E3%81%A7%E4%BD%9C%E3%82%8B%E5%A0%B4%E5%90%88dbdb-less-%E5%85%B1%E9%80%9A">（参考）Kong を <strong>手動(curl)</strong> で作る場合（DB/DB-LESS 共通）</h2>
+<p>Admin API：<code>http://localhost:8001</code></p>
+<h3 id="1-services">1) Services</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># === Quarkus BFF (API) ===</span>
+curl -sS -X PUT http://localhost:8001/services/api-svc \
+  -d url=http://quarkus-authz:8080
+
+<span class="hljs-comment"># === Vite Dev (Frontend) ===</span>
+curl -sS -X PUT http://localhost:8001/services/frontend-dev \
+  -d url=http://frontend:5173
+</div></code></pre>
+<h3 id="2-routesbff-%E5%81%B4">2) Routes（BFF 側）</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># /api → BFF。/api は剥がす</span>
+curl -sS -X PUT http://localhost:8001/routes/api-route \
+  -d service.name=api-svc -d paths[]=/api -d strip_path=<span class="hljs-literal">true</span> \
+  -d preserve_host=<span class="hljs-literal">true</span> -d path_handling=v0
+
+<span class="hljs-comment"># OIDC コールバックはそのまま渡す</span>
+<span class="hljs-keyword">for</span> p <span class="hljs-keyword">in</span> login <span class="hljs-built_in">logout</span> hello secure; <span class="hljs-keyword">do</span>
+  curl -sS -X PUT http://localhost:8001/routes/<span class="hljs-variable">$p</span>-route \
+    -d service.name=api-svc -d paths[]=/<span class="hljs-variable">$p</span> \
+    -d strip_path=<span class="hljs-literal">false</span> -d preserve_host=<span class="hljs-literal">true</span> -d path_handling=v0
+<span class="hljs-keyword">done</span>
+</div></code></pre>
+<h3 id="3-routes%E3%83%95%E3%83%AD%E3%83%B3%E3%83%88%E5%81%B4">3) Routes（フロント側）</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># /app と /app/ の両方を受ける。strip_path=false &amp; v1</span>
+curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
+  -d service.name=frontend-dev \
+  -d paths[]=/app -d paths[]=/app/ \
+  -d strip_path=<span class="hljs-literal">false</span> -d preserve_host=<span class="hljs-literal">true</span> -d path_handling=v1
+</div></code></pre>
+<h3 id="4-%E7%A2%BA%E8%AA%8D">4) 確認</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># ルート一覧</span>
+curl -s http://localhost:8001/routes \
+  | jq <span class="hljs-string">'.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'</span>
+
+<span class="hljs-comment"># サービス一覧</span>
+curl -s http://localhost:8001/services \
+  | jq <span class="hljs-string">'.data[] | {name, host, port, path}'</span>
+</div></code></pre>
+<hr>
+<h2 id="%E5%B0%86%E6%9D%A5%E7%94%A8kong-db-%E3%83%A2%E3%83%BC%E3%83%89%E3%81%A7%E3%81%AE%E6%B3%A8%E6%84%8F%E7%82%B9">（将来用）Kong <strong>DB モード</strong>での注意点</h2>
+<p>DB モードに切替えるときは：</p>
+<ul>
+<li><code>KONG_DATABASE=postgres</code> を指定</li>
+<li><code>KONG_DECLARATIVE_CONFIG</code> は <strong>外す</strong></li>
+<li>初回のみ <strong>マイグレーション</strong>が必要</li>
+</ul>
+<pre class="hljs"><code><div><span class="hljs-comment"># （DBモードのみ初回）</span>
+docker compose run --rm kong kong migrations bootstrap
+</div></code></pre>
+<p>宣言的設定を DB に反映するときは <strong>deck</strong> を使用（ファイル：<code>kong/kong-deck.yaml</code>。select-tag で対象限定）。</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># 差分確認</span>
+deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
+<span class="hljs-comment"># 反映</span>
+deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
+</div></code></pre>
+<blockquote>
+<p>✅ <strong>DB と DB-LESS を同時に設定しない</strong>
+<code>KONG_DATABASE=postgres</code> と <code>KONG_DATABASE=off</code>／<code>KONG_DECLARATIVE_CONFIG</code> を同居させないでください。</p>
+</blockquote>
+<hr>
+<h2 id="keycloakrealm-demo-realm">Keycloak（realm: <code>demo-realm</code>）</h2>
+<p><code>docker-compose.yaml</code> で <code>./realms/demo-realm.json</code> を <strong>自動インポート</strong>します。
+同 JSON にはユーザ例が含まれます：</p>
+<ul>
+<li><code>testuser</code>（パスワード <code>password</code>、A/B に <code>read</code>,<code>user</code> 付与）</li>
+<li><code>dummyuser</code>（パスワード <code>password</code>、<code>dummy</code>,<code>user</code> 付与）→ <strong>A/B の <code>read</code> が無い</strong>ため権限エラー確認に使えます</li>
+</ul>
+<blockquote>
+<p>もし <code>quarkus-client</code> を <strong>Confidential</strong> にする場合は、Keycloak 管理画面で
+クライアント種別を変更して <strong>Secret</strong> を発行し、BFF の <code>application.properties</code> に反映してください。</p>
+</blockquote>
+<hr>
+<h2 id="%E3%82%A2%E3%83%97%E3%83%AA%E3%81%AE%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88">アプリのポイント</h2>
+<h3 id="quarkusbff">Quarkus（BFF）</h3>
+<ul>
+<li>
+<p>OIDC Code Flow（<code>/login</code> で受け、認証後は <code>/app/</code> に戻す）</p>
+</li>
+<li>
+<p>セッションは <strong>Redis Token State Manager</strong> を使用（Cookie は参照キーのみ）</p>
+</li>
+<li>
+<p><strong>トークン転送</strong>：BFF はログイン中の <strong>AccessToken</strong> を取り出して
+<strong>下流クライアントに <code>Authorization: Bearer …</code> を手動で付与</strong>（MicroProfile Rest Client）</p>
+</li>
+<li>
+<p><strong>権限エラー整形</strong>：下流が 401/403 の場合、BFF は <strong>403</strong> を返すようにハンドリング
+→ フロントは「権限エラー」を表示</p>
+</li>
+<li>
+<p><code>/api/me</code> は <strong>roles を集約して返却</strong>（<code>realm_access.roles</code> + <code>resource_access.*.roles</code>）</p>
+</li>
+</ul>
+<h3 id="frontendvitereact">Frontend（Vite/React）</h3>
+<ul>
+<li><code>vite.config.ts</code> の <code>base: '/app/'</code></li>
+<li><code>/api/*</code> 呼び出しのエラーハンドリングで <strong>401/403 → 権限エラー表示</strong></li>
+</ul>
+<hr>
+<h2 id="%E5%8B%95%E4%BD%9C%E7%A2%BA%E8%AA%8D%E6%89%8B%E9%A0%86">動作確認手順</h2>
+<ol>
+<li><code>http://localhost:8000/app/</code></li>
+<li>「ログイン」→ <code>testuser/password</code> でログイン</li>
+<li>「/api/me」→ <code>roles</code> に <code>read</code>,<code>user</code> が含まれること</li>
+<li>「/api/mashup」→ A/B の結果が返ること</li>
+<li>ログアウト → <code>dummyuser/password</code> でログイン</li>
+<li>「/api/mashup」→ <strong>権限エラー</strong>（403）が表示されること</li>
+</ol>
+<hr>
+<h2 id="%E3%83%88%E3%83%A9%E3%83%96%E3%83%AB%E3%82%B7%E3%83%A5%E3%83%BC%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0">トラブルシューティング</h2>
+<ul>
+<li>
+<p><strong><code>/app/</code> が 301 ループ</strong>
+→ フロントのルートを <strong><code>/app</code> と <code>/app/</code> の両方</strong>登録、<code>strip_path=false</code>、<code>path_handling=v1</code>。</p>
+</li>
+<li>
+<p><strong>Kong が起動時に <code>…/kong.yml: Is a directory</code></strong>
+→ <code>KONG_DECLARATIVE_CONFIG</code> に <strong>ファイル</strong>をマウントしているか確認（ディレクトリ不可）。</p>
+</li>
+<li>
+<p><strong>Keycloak 反応が遅く BFF が接続失敗</strong>
+→ compose の <code>depends_on</code> と <strong>healthcheck</strong> を設定（本リポジトリは設定済み）。</p>
+</li>
+<li>
+<p><strong><code>/login</code> で 404</strong>
+→ <code>login-route</code> が <strong><code>strip_path=false</code></strong> で BFF に素通しされているか。</p>
+</li>
+<li>
+<p><strong>roles が <code>/api/me</code> に出ない</strong>
+→ BFF は JWT から <code>realm_access.roles</code> と <code>resource_access.*.roles</code> を集約。
+Keycloak 側で対象クライアントのロール付与/Token に <code>aud</code> が載っているか確認。</p>
+</li>
+</ul>
+<hr>
+<h2 id="%E5%8F%82%E8%80%83%E4%B8%BB%E8%A6%81%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB">参考：主要ファイル</h2>
+<ul>
+<li><code>docker-compose.yaml</code> … 全体起動（DB-LESS前提）</li>
+<li><code>kong/kong.yml</code> … DB-LESS の宣言的設定（Service/Route）</li>
+<li><code>kong/kong-deck.yaml</code> … <strong>DB モード用</strong>の deck 状態ファイル</li>
+<li><code>quarkus-authz/src/main/java/example/api/MeResource.java</code> … ユーザ情報（roles 集約）</li>
+<li><code>quarkus-authz/src/main/java/org/example/api/MashupResource.java</code> … 下流呼び出し &amp; 401/403 → 403 整形</li>
+<li><code>frontend/src/api.ts</code> … 401/403 を「権限エラー」にマップ</li>
+<li><code>frontend/vite.config.ts</code> … <code>base: '/app/'</code></li>
+</ul>
+<hr>
+<h2 id="%E3%83%A9%E3%82%A4%E3%82%BB%E3%83%B3%E3%82%B9">ライセンス</h2>
+<p>本リポジトリ内のコードは学習目的のサンプルです。必要に応じてコピー/改変してご利用ください。</p>
+<hr>
+<h2 id="%E4%BB%98%E9%8C%B2%E6%89%8B%E5%85%83%E3%81%A7-kong-%E3%81%AE%E7%8A%B6%E6%85%8B%E3%82%92%E7%A2%BA%E8%AA%8D%E3%81%99%E3%82%8B%E3%83%AF%E3%83%B3%E3%83%A9%E3%82%A4%E3%83%8A%E3%83%BC">付録：手元で Kong の状態を確認するワンライナー</h2>
+<pre class="hljs"><code><div><span class="hljs-comment"># Routes</span>
+curl -s http://localhost:8001/routes \
+  | jq <span class="hljs-string">'.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'</span>
+
+<span class="hljs-comment"># Services</span>
+curl -s http://localhost:8001/services \
+  | jq <span class="hljs-string">'.data[] | {name, host, port, path}'</span>
+</div></code></pre>
+<hr>
+<h2 id="%E4%BB%98%E9%8C%B2redis-%E3%81%AB%E4%BF%9D%E7%AE%A1%E3%81%95%E3%82%8C%E3%81%9F%E3%82%BB%E3%83%83%E3%82%B7%E3%83%A7%E3%83%B3%E6%83%85%E5%A0%B1%E3%82%92%E7%A2%BA%E8%AA%8D%E3%81%99%E3%82%8B%E9%96%8B%E7%99%BA%E6%99%82%E3%81%AE%E6%89%8B%E5%BC%95%E3%81%8D">付録：Redis に保管されたセッション情報を確認する（開発時の手引き）</h2>
+<p>BFF（Quarkus）は <strong>Redis Token State Manager</strong> でセッション相当のトークン状態を保存します（Cookie には参照キーのみ）。
+開発時に中身や存続時間を確認したい場合は、以下の手順で Redis を操作します。</p>
+<blockquote>
+<p>⚠️本番では <code>KEYS *</code> や <code>MONITOR</code> は避けてください。<strong><code>SCAN</code> を使う</strong>のが安全です。
+このリポジトリの Compose では <code>redis</code> サービス名で起動しています。</p>
+</blockquote>
+<h3 id="1-redis-cli-%E3%82%92%E9%96%8B%E3%81%8F">1) Redis CLI を開く</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># コンテナ上の redis-cli を開く</span>
+docker compose <span class="hljs-built_in">exec</span> redis redis-cli
+</div></code></pre>
+<h3 id="2-%E3%82%AD%E3%83%BC%E3%82%92%E6%8E%A2%E3%81%99scan-%E6%8E%A8%E5%A5%A8">2) キーを探す（SCAN 推奨）</h3>
+<p>ログイン直後にセッション関連キーが作られます。キー名はバージョンで多少変わるため、<strong>ワイルドカードで探す</strong>のがコツです。</p>
+<pre class="hljs"><code><div># まずは全体をざっと（開発専用）
+SCAN 0 MATCH * COUNT 100
+
+# よく使うパターン例（いずれかにヒットするはず）
+SCAN 0 MATCH *session* COUNT 100
+SCAN 0 MATCH *oidc*    COUNT 100
+SCAN 0 MATCH *token*   COUNT 100
+</div></code></pre>
+<blockquote>
+<p>ブラウザの Cookie にある <strong><code>q_session</code></strong> の値（<code>localhost:8000</code> ドメイン）を使うと特定が早いです。
+Cookie 値の一部でマッチさせる例：<code>SCAN 0 MATCH *&lt;q_sessionの値の先頭数文字&gt;* COUNT 100</code></p>
+</blockquote>
+<h3 id="3-%E3%82%AD%E3%83%BC%E5%86%85%E5%AE%B9%E3%81%A8-ttl-%E3%82%92%E8%A6%8B%E3%82%8B">3) キー内容と TTL を見る</h3>
+<p>キーの <strong>種類</strong> によって読み方が異なります。<code>TYPE</code> で判定してから <code>GET</code>（string）または <code>HGETALL</code>（hash）を使います。</p>
+<pre class="hljs"><code><div># 例：見つけたキーを K とする
+TYPE K
+TTL  K          # 残存秒数（例：1200秒 ≒ 20分）
+
+# 文字列キーの場合
+GET K
+
+# ハッシュキーの場合（フィールドと値の一覧）
+HGETALL K
+</div></code></pre>
+<blockquote>
+<p>値は JSON かシリアライズ済みの文字列です。<code>GET</code> の表示をそのまま参考にし、意味が分かりにくい場合は <strong>TTL</strong> で寿命だけ確認するのが手堅いです。</p>
+</blockquote>
+<h3 id="4-%E7%89%B9%E5%AE%9A%E3%82%BB%E3%83%83%E3%82%B7%E3%83%A7%E3%83%B3%E3%81%A0%E3%81%91%E5%89%8A%E9%99%A4%E9%96%8B%E7%99%BA%E6%99%82%E3%81%AE%E5%86%8D%E7%8F%BE%E7%94%A8">4) 特定セッションだけ削除（開発時の再現用）</h3>
+<pre class="hljs"><code><div>DEL K
+</div></code></pre>
+<blockquote>
+<p>ログアウトや消し込みの再現をしたい時に便利です。</p>
+</blockquote>
+<h3 id="5-%E3%81%99%E3%81%B9%E3%81%A6%E3%81%AE%E3%82%BB%E3%83%83%E3%82%B7%E3%83%A7%E3%83%B3%E3%82%92%E6%B6%88%E3%81%99%E9%96%8B%E7%99%BA%E5%B0%82%E7%94%A8">5) すべてのセッションを消す（開発専用）</h3>
+<pre class="hljs"><code><div>FLUSHDB     # 現在のDBを全消去（開発専用）
+# もしくは
+FLUSHALL    # すべてのDBを全消去（要注意）
+</div></code></pre>
+<blockquote>
+<p>Compose の <code>redis</code> は <code>./data/redis</code> を永続化しています。完全にリセットしたいときは
+コンテナ停止後にそのディレクトリを削除する方法でも初期化できます。</p>
+</blockquote>
 <hr>
 
 </body>

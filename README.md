@@ -1,13 +1,19 @@
+最高です！リポジトリの“いま”の構成（Kong=DB-LESS、フロントは `/app`、BFF は `/api/*`、Keycloak/Redis あり）に合わせて、README.md を丸っと書き直しました。
+**DB-LESSを標準**にしつつ、**将来 DB モードへ切替えるときの注意点**と **deck/手動(curl) の手順**も残しています。
+
+---
+
 # 多段認証・多段認可デモ
 
-**Quarkus × Kong × Keycloak × Redis × React(Vite)**
+**Quarkus (BFF/Aggregator) × Kong × Keycloak × Redis × React(Vite)**
 
-ユーザー → **Kong** → **Quarkus(BFF/Aggregator)** で OIDC ログイン（セッションは **Redis**）。
-Quarkus はユーザーの **Access Token** を **Service A/B** に転送し、それぞれの認可ポリシーで判定 → 結果をマージして返します。
+ユーザー → **Kong** → **Quarkus(BFF)** で OIDC ログイン（セッションは **Redis**） →
+BFF は **ユーザーのアクセストークンを下流へ転送** → **Service A/B** がそれぞれ認可判定 → 結果をマージして返す構成です。
 
-* Kong がフロントの**ルーティング**を担当（`/app` は Frontend、`/api/*` は BFF）。
-* OIDC コールバックは **`/login`** に固定し、BFF 側で最終的に **`/app/`** に戻します。
-* フロント（React + Vite dev）は「ログイン」「/api/me」「/api/mashup」などを操作できます。
+* フロント：`/app/*`（Vite Dev Server）
+* BFF/API：`/api/*`（Quarkus）
+* OIDC コールバック：`/login`（BFFで受けて `/app/` に戻す）
+* セッション：Redis（Token State Manager）
 
 ---
 
@@ -15,350 +21,395 @@ Quarkus はユーザーの **Access Token** を **Service A/B** に転送し、�
 
 ```
 [Browser]  http://localhost:8000
-   |  /app,/app/                          | /api/*, /login, /secure, /logout, /hello
-   v                                      v
-+------------------+                 +------------------+
-|  Frontend(Vite)  |                 |  Quarkus BFF     |
-|  http://frontend:5173              |  http://quarkus-authz:8080
-+------------------+                 +---------+--------+
-                                              |
-                               (Bearer)       |  /a/*, /b/*
-                                              v
-                                   +----------+---------+
-                                   |   Service A / B    |
-                                   +--------------------+
+     |
+     v
++------------------+           Kong (proxy:8000, admin:8001)
+|       Kong       |
++------------------+
+   | /app/*                            | /api/*, /login, /secure, /logout, /hello
+   v                                    v
++---------------------+             +---------------------+
+|  frontend (Vite)    |             |  Quarkus BFF (8080) |
+|  http://frontend:5173             |  http://quarkus-authz:8080
++---------------------+             +----------+----------+
+                                               |
+                               (Bearer)        |   /a/*, /b/*
+                                               v
+                                     +---------+---------+
+                                     |  service-a / -b   |
+                                     +-------------------+
 
-Kong:     proxy :8000, admin :8001
-Keycloak: http://keycloak:8080 (realm: demo-realm)  ※realms/から自動import
-Redis:    OIDC セッション保持
+Keycloak: http://keycloak:8080 (realm: demo-realm)
+Redis:    OIDC Token State を外だし
+Konga(任意): http://localhost:1337
 ```
-
----
-
-## 前提
-
-* JDK 17、Maven
-* Docker / Docker Compose
-* Node.js 18+（推奨 20）/ npm（nvm 推奨）
-* `jq`（確認に便利）
-* `deck` 1.36+（Kong 設定の宣言的適用に使用）
-
----
-
-## リポジトリ
-
-```bash
-git clone https://github.com/h-i500/multi-authentication.git
-cd multi-authentication
-```
-
-主要構成（抜粋）:
-
-```
-multi-authentication/
-├─ docker-compose.yaml
-├─ kong/
-│  ├─ kong.yml             # DB-less 起動で読み込まれる宣言的設定（KONG_DECLARATIVE_CONFIG）
-│  ├─ kong-deck.yaml       # deck 用 state（DB/DB-less 双方に適用可能）
-│  └─ kong-nginx-http.conf # 追加の nginx http コンテキスト（大きめヘッダなどの調整）
-├─ realms/                 # Keycloak の realm 定義（自動 import）
-├─ frontend/               # Vite + React (base=/app/)
-│  ├─ vite.config.ts       # base: '/app/'
-│  └─ src/App.tsx          # /api/login, /api/logout, /api/me, /api/mashup
-├─ quarkus-authz/          # BFF (OIDC web-app + Redis セッション)
-└─ service-a, service-b    # 下流サービス (Bearer)
-```
-
----
-
-## ビルド（初回/変更時）
-
-```bash
-cd quarkus-authz && mvn clean package && cd ..
-cd service-a     && mvn clean package && cd ..
-cd service-b     && mvn clean package && cd ..
-cd frontend      && npm ci && npm run build && cd ..
-```
-
----
-
-## 起動（デフォルト：**Kong は DB-less**）
-
-`docker-compose.yaml` は **DB-less** 起動向けです。Kong は `kong/kong.yml` を読み込みます。
-
-```bash
-docker compose up -d --build
-```
-
-公開ポート
-
-* Kong 8000/8001, Keycloak 8080, Frontend 5173（任意公開）, Quarkus(BFF) 8081（ホスト公開）
-
-> **注意（DB-less）**
-> `KONG_DECLARATIVE_CONFIG` は **ファイルパス** を指します。
-> ディレクトリをマウントすると「`.../kong.yml: Is a directory`」エラーで起動しません。
-
----
-
-## 使い方（ブラウザ）
-
-1. `http://localhost:8000/app/` を開く
-2. 「ログイン」 → Keycloak 認証 → BFF が `/app/` に戻す
-3. `/api/me` と `/api/mashup` が 200 で返ってくるのを確認
-4. 「ログアウト」 → `/app/` に戻る（再び `/api/me` で未認証に）
-
----
-
-## Kong 設定の更新方法
-
-### DB-less（推奨の簡単手順）
-
-* `kong/kong.yml` を編集 → **Kong 再起動**（または `POST /config`）で反映
-* もしくは deck で現在実体と差分/反映も可能（DB-less でも Admin API 経由で適用できます）
-
-```bash
-# 差分確認
-deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
-
-# 反映（DB-lessでも使用可：メモリへ適用）
-deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
-```
-
-> DB-less で deck による適用を行った場合、その内容は\*\*揮発（再起動で消える）\*\*です。
-> 永続させたい設定は `kong/kong.yml` にも反映しておきましょう。
-> （例：`deck gateway dump > kong/kong.yml` で現在の実体を落として保存）
-
-### DB モードで動かす場合（将来用のメモ）
-
-DB モードに切り替えると Kong の設定は Postgres に永続化されます。
-`docker-compose.yaml` の `kong` サービスを DB モード用に戻し、以下を実施します。
-
-```bash
-# （DBモードのみ初回）Kong DB マイグレーション
-docker compose run --rm kong kong migrations bootstrap
-
-# deck で反映（DBモード推奨の適用方法）
-deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
-deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
-```
-
-> **DB モードの注意点**
->
-> * Postgres には \*\*Kong の全エンティティ（services/routes/plugins/consumers など）\*\*が格納されます。
-> * Konga を使う場合は、Konga 用 DB も必要です（同一 Postgres サーバ内の別 DB で運用可）。
-> * DB から DB-less へ切り替えるときは、`deck gateway dump > kong/kong.yml` で宣言ファイルを書き出してから移行すると安全です。
-
----
-
-## Kong のサービス/ルートを \*\*手動（curl）\*\*で作る（idempotent）
-
-> すでに `kong/kong.yml` や `kong-deck.yaml` に同等の定義が入っています。
-> 手で作りたい/検証したい場合は以下を流せば同じ状態になります。
-
-**Services**
-
-```bash
-# Quarkus BFF (API)
-curl -sS -X PUT http://localhost:8001/services/api-svc \
-  -d url=http://quarkus-authz:8080 \
-  -d tags[]=stack-multi-authn
-
-# Frontend (Vite dev)
-curl -sS -X PUT http://localhost:8001/services/frontend-dev \
-  -d url=http://frontend:5173 \
-  -d tags[]=stack-multi-authn
-```
-
-**Routes（BFF 側）**
-
-```bash
-# /api → BFF。/api は剥がす（/api/* → /*）
-curl -sS -X PUT http://localhost:8001/routes/api-route \
-  -d service.name=api-svc \
-  -d paths[]=/api \
-  -d strip_path=true \
-  -d preserve_host=true \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-# /login（OIDC コールバック）は剥がさない
-curl -sS -X PUT http://localhost:8001/routes/login-route \
-  -d service.name=api-svc \
-  -d paths[]=/login \
-  -d strip_path=false \
-  -d preserve_host=true \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-# /logout も剥がさない
-curl -sS -X PUT http://localhost:8001/routes/logout-route \
-  -d service.name=api-svc \
-  -d paths[]=/logout \
-  -d strip_path=false \
-  -d preserve_host=true \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-# /hello も剥がさない（BFF 直通）
-curl -sS -X PUT http://localhost:8001/routes/hello-route \
-  -d service.name=api-svc \
-  -d paths[]=/hello \
-  -d strip_path=false \
-  -d preserve_host=true \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-
-# /secure（OIDC 開始の踏み台）も剥がさない
-curl -sS -X PUT http://localhost:8001/routes/secure-route \
-  -d service.name=api-svc \
-  -d paths[]=/secure \
-  -d strip_path=false \
-  -d preserve_host=true \
-  -d path_handling=v0 \
-  -d tags[]=stack-multi-authn
-```
-
-**Routes（Frontend 側）**
-
-```bash
-# /app と /app/ の両方を Frontend へ。Vite dev は strip_path=false & path_handling=v1 が安全
-curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
-  -d service.name=frontend-dev \
-  -d paths[]=/app \
-  -d paths[]=/app/ \
-  -d strip_path=false \
-  -d preserve_host=true \
-  -d path_handling=v1 \
-  -d tags[]=stack-multi-authn
-```
-
-**確認**
-
-```bash
-curl -s http://localhost:8001/services | jq '.data[] | {name, host, port, path}'
-curl -s http://localhost:8001/routes    | jq '.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'
-
-curl -i http://localhost:8000/hello
-curl -I http://localhost:8000/app/
-```
-
-> `/app` と `/app/` を**両方**作る & `strip_path=false`、`path_handling=v1` が Vite dev では重要（301 ループ/アセット 404 を防止）。
-> `preserve_host=true` は外向きホスト/パス情報を BFF/Frontend に正しく伝えるのに有効です。
-
----
-
-## Keycloak（demo-realm）
-
-* 管理 UI: `http://localhost:8080/`（Admin: `admin` / `admin`）
-* realm は `realms/` から**自動インポート**
-
-代表的なクライアント設定
-
-* `quarkus-client`（BFF 用）: OIDC/Confidential、Authorization Code、Valid Redirect URIs に
-  `http://localhost:8000/*`、`http://localhost:8081/*` 等、Web Origins は `http://localhost:8000`, `http://localhost:8081`。
-  Credentials の **Secret** を BFF に設定。
-* `service-a` / `service-b`（下流）: Bearer-only
-
-ロール & Audience
-
-* `service-a`: `read`, `user` / `service-b`: `read`, `user` を `testuser` に付与
-* `quarkus-client` に Audience マッパーで `service-a` と `service-b` を `aud` に含める
-
----
-
-## BFF（Quarkus）の要点
-
-`quarkus-authz/src/main/resources/application.properties`（抜粋）
-
-```properties
-# OIDC
-quarkus.oidc.auth-server-url=http://keycloak:8080/realms/demo-realm
-quarkus.oidc.client-id=quarkus-client
-quarkus.oidc.credentials.client-secret.value=...   # Keycloak の Secret
-quarkus.oidc.application-type=web-app
-quarkus.http.proxy.proxy-address-forwarding=true
-
-# コールバックを /login に固定し、戻り先はアプリ側で制御
-quarkus.oidc.authentication.redirect-path=/login
-quarkus.oidc.authentication.restore-path-after-redirect=false
-
-# PKCE / state
-quarkus.oidc.authentication.pkce-required=true
-quarkus.oidc.authentication.state-secret=${STATE_SECRET:change-me-change-me-change-me-1234}
-
-# Redis セッション
-quarkus.redis.hosts=redis://redis:6379
-quarkus.oidc.token-state-manager.strategy=keep-all-tokens
-# 必要なら分割:
-# quarkus.oidc.token-state-manager.split-tokens=true
-
-# API 保護の例
-quarkus.http.auth.permission.authenticated.paths=/api/*
-quarkus.http.auth.permission.authenticated.policy=authenticated
-```
-
-`LoginResource` の役割：
-
-* `GET /login`（PermitAll）: 未ログイン→`/secure` に 302、ログイン済→`/app/` に 302
-* `GET /secure`（Authenticated）: OIDC 開始 → 認証後 `/app/`
-* `GET /logout`: セッション破棄 → `/app/`
-
-## Redis でセッション確認
-
-```bash
-docker exec -it <redis-container> redis-cli
-127.0.0.1:6379> SCAN 0 MATCH * COUNT 100
-127.0.0.1:6379> TTL "oidc:token:..."   # 残存時間
-```
-
-
-
----
-
-## 下流サービス（A/B）の要点
-
-```properties
-# 共通
-quarkus.oidc.auth-server-url=http://keycloak:8080/realms/demo-realm
-quarkus.oidc.application-type=service
-quarkus.oidc.roles.source=accesstoken
-
-# service-a:
-quarkus.oidc.client-id=service-a
-quarkus.oidc.roles.role-claim-path=resource_access["service-a"].roles
-
-# service-b:
-quarkus.oidc.client-id=service-b
-quarkus.oidc.roles.role-claim-path=resource_access["service-b"].roles
-```
-
----
-
-## よくあるハマりどころ
-
-* **/app が 301 ループ/アセット 404**
-  → Kong で `/app` と `/app/` の**両方**をルート登録、`strip_path=false`、`path_handling=v1`。
-  → Vite の `base='/app/'` を確認。
-* **/login が 404**
-  → `login-route` が `strip_path=false` か確認。剥がしてしまうと BFF の `/login` に届かず 404。
-* **「State parameter can not be empty」ログ**
-  → `/login` を直接開いた直後などに見えることがあります（導線として `/secure` 経由で問題なし）。
-* **Keycloak 未起動 / 起動待ち不足**
-  → Compose の `healthcheck` を入れるか、起動順に注意。
-* **DB-less で起動しない**
-  → `KONG_DECLARATIVE_CONFIG` が**ファイル**を指しているか確認（ディレクトリは不可）。
 
 ---
 
 ## 主要エンドポイント
 
-* Frontend: `http://localhost:8000/app/`
-* API(BFF): `http://localhost:8000/api/*`
+* フロント：`http://localhost:8000/app/`
+* API(BFF)：`http://localhost:8000/api/*`
 
-  * ログイン: `/api/login`（→ `/secure` → Keycloak → `/login` → `/app/`）
-  * ログアウト: `/api/logout`
-  * 認証ユーザ: `/api/me`
-  * マッシュアップ: `/api/mashup`
-* Keycloak: `http://localhost:8080/`（realm: `demo-realm`）
+  * ログイン：`/api/login` →（Kong/BFF）→ `/secure` →（Keycloak）→ `/login` → `/app/`
+  * ログアウト：`/api/logout`
+  * 認証ユーザ：`/api/me`
+  * マッシュアップ：`/api/mashup`
+* Keycloak：`http://localhost:8080/`（realm: `demo-realm`）
+* Konga（任意）：`http://localhost:1337/`
+
+---
+
+## 前提
+
+* JDK 17、Maven、Docker / Docker Compose、Node.js (18+)
+* `jq`（Kong の確認で便利）
+* deck（DB モードで使うと便利）：[https://github.com/kong/deck/releases](https://github.com/kong/deck/releases)
+
+---
+
+## セットアップ & 起動（DB-LESS：標準）
+
+> リポジトリは **DB-LESS モード**で起動しやすい `docker-compose.yaml` と
+> **宣言的設定** `kong/kong.yml` を同梱しています。
+
+```bash
+git clone https://github.com/h-i500/multi-authentication.git
+cd multi-authentication
+
+# アプリをビルド
+cd quarkus-authz && mvn clean package && cd ..
+cd service-a     && mvn clean package && cd ..
+cd service-b     && mvn clean package && cd ..
+cd frontend      && npm ci            && cd ..
+
+# 全体を起動
+docker compose up -d --build
+```
+
+> ✅ 起動後：
+> `http://localhost:8000/app/` にアクセス → 「ログイン」ボタン → Keycloak ログイン → `/app/` に戻る →
+> 「/api/me」「/api/mashup」ボタンで BFF 経由の API を確認できます。
+> **権限不足**の場合、フロントは **「権限エラー：この操作を行う権限がありません。」** を表示します。
+
+---
+
+## Kong（DB-LESS）宣言的設定
+
+Kong は DB-LESS で、`kong/kong.yml` が読み込まれます（compose で `KONG_DATABASE=off` / `KONG_DECLARATIVE_CONFIG` を指定）。
+
+`kong/kong.yml`（抜粋・実態はリポジトリ内を使用）
+
+```yaml
+_format_version: "3.0"
+_transform: true
+
+services:
+  # === Quarkus BFF (API) ===
+  - name: api-svc
+    host: quarkus-authz
+    port: 8080
+    protocol: http
+    routes:
+      - name: api-route
+        paths: ["/api"]
+        strip_path: true
+        preserve_host: true
+        path_handling: v0
+
+      - name: login-route
+        paths: ["/login"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+
+      - name: logout-route
+        paths: ["/logout"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+
+      - name: hello-route
+        paths: ["/hello"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+
+      - name: secure-route
+        paths: ["/secure"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v0
+
+  # === Vite Dev Server (Frontend) ===
+  - name: frontend-dev
+    host: frontend
+    port: 5173
+    protocol: http
+    routes:
+      - name: frontend-dev-route
+        # 301/ループ回避のため "/app" と "/app/" の両方
+        paths: ["/app", "/app/"]
+        strip_path: false
+        preserve_host: true
+        path_handling: v1
+```
+
+> ⚠️ **ありがちなミス**：`KONG_DECLARATIVE_CONFIG` に **ディレクトリ**をマウントすると
+> 「`…/kong.yml: Is a directory`」で起動失敗します。**ファイル**をマウントしてください。
+
+---
+
+## （参考）Kong を **手動(curl)** で作る場合（DB/DB-LESS 共通）
+
+Admin API：`http://localhost:8001`
+
+### 1) Services
+
+```bash
+# === Quarkus BFF (API) ===
+curl -sS -X PUT http://localhost:8001/services/api-svc \
+  -d url=http://quarkus-authz:8080
+
+# === Vite Dev (Frontend) ===
+curl -sS -X PUT http://localhost:8001/services/frontend-dev \
+  -d url=http://frontend:5173
+```
+
+### 2) Routes（BFF 側）
+
+```bash
+# /api → BFF。/api は剥がす
+curl -sS -X PUT http://localhost:8001/routes/api-route \
+  -d service.name=api-svc -d paths[]=/api -d strip_path=true \
+  -d preserve_host=true -d path_handling=v0
+
+# OIDC コールバックはそのまま渡す
+for p in login logout hello secure; do
+  curl -sS -X PUT http://localhost:8001/routes/$p-route \
+    -d service.name=api-svc -d paths[]=/$p \
+    -d strip_path=false -d preserve_host=true -d path_handling=v0
+done
+```
+
+### 3) Routes（フロント側）
+
+```bash
+# /app と /app/ の両方を受ける。strip_path=false & v1
+curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
+  -d service.name=frontend-dev \
+  -d paths[]=/app -d paths[]=/app/ \
+  -d strip_path=false -d preserve_host=true -d path_handling=v1
+```
+
+### 4) 確認
+
+```bash
+# ルート一覧
+curl -s http://localhost:8001/routes \
+  | jq '.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'
+
+# サービス一覧
+curl -s http://localhost:8001/services \
+  | jq '.data[] | {name, host, port, path}'
+```
+
+---
+
+## （将来用）Kong **DB モード**での注意点
+
+DB モードに切替えるときは：
+
+* `KONG_DATABASE=postgres` を指定
+* `KONG_DECLARATIVE_CONFIG` は **外す**
+* 初回のみ **マイグレーション**が必要
+
+```bash
+# （DBモードのみ初回）
+docker compose run --rm kong kong migrations bootstrap
+```
+
+宣言的設定を DB に反映するときは **deck** を使用（ファイル：`kong/kong-deck.yaml`。select-tag で対象限定）。
+
+```bash
+# 差分確認
+deck gateway diff kong/kong-deck.yaml --select-tag stack-multi-authn
+# 反映
+deck gateway sync kong/kong-deck.yaml --select-tag stack-multi-authn --yes
+```
+
+> ✅ **DB と DB-LESS を同時に設定しない**
+> `KONG_DATABASE=postgres` と `KONG_DATABASE=off`／`KONG_DECLARATIVE_CONFIG` を同居させないでください。
+
+---
+
+## Keycloak（realm: `demo-realm`）
+
+`docker-compose.yaml` で `./realms/demo-realm.json` を **自動インポート**します。
+同 JSON にはユーザ例が含まれます：
+
+* `testuser`（パスワード `password`、A/B に `read`,`user` 付与）
+* `dummyuser`（パスワード `password`、`dummy`,`user` 付与）→ **A/B の `read` が無い**ため権限エラー確認に使えます
+
+> もし `quarkus-client` を **Confidential** にする場合は、Keycloak 管理画面で
+> クライアント種別を変更して **Secret** を発行し、BFF の `application.properties` に反映してください。
+
+---
+
+## アプリのポイント
+
+### Quarkus（BFF）
+
+* OIDC Code Flow（`/login` で受け、認証後は `/app/` に戻す）
+
+* セッションは **Redis Token State Manager** を使用（Cookie は参照キーのみ）
+
+* **トークン転送**：BFF はログイン中の **AccessToken** を取り出して
+  **下流クライアントに `Authorization: Bearer …` を手動で付与**（MicroProfile Rest Client）
+
+* **権限エラー整形**：下流が 401/403 の場合、BFF は **403** を返すようにハンドリング
+  → フロントは「権限エラー」を表示
+
+* `/api/me` は **roles を集約して返却**（`realm_access.roles` + `resource_access.*.roles`）
+
+### Frontend（Vite/React）
+
+* `vite.config.ts` の `base: '/app/'`
+* `/api/*` 呼び出しのエラーハンドリングで **401/403 → 権限エラー表示**
+
+---
+
+## 動作確認手順
+
+1. `http://localhost:8000/app/`
+2. 「ログイン」→ `testuser/password` でログイン
+3. 「/api/me」→ `roles` に `read`,`user` が含まれること
+4. 「/api/mashup」→ A/B の結果が返ること
+5. ログアウト → `dummyuser/password` でログイン
+6. 「/api/mashup」→ **権限エラー**（403）が表示されること
+
+---
+
+## トラブルシューティング
+
+* **`/app/` が 301 ループ**
+  → フロントのルートを **`/app` と `/app/` の両方**登録、`strip_path=false`、`path_handling=v1`。
+
+* **Kong が起動時に `…/kong.yml: Is a directory`**
+  → `KONG_DECLARATIVE_CONFIG` に **ファイル**をマウントしているか確認（ディレクトリ不可）。
+
+* **Keycloak 反応が遅く BFF が接続失敗**
+  → compose の `depends_on` と **healthcheck** を設定（本リポジトリは設定済み）。
+
+* **`/login` で 404**
+  → `login-route` が **`strip_path=false`** で BFF に素通しされているか。
+
+* **roles が `/api/me` に出ない**
+  → BFF は JWT から `realm_access.roles` と `resource_access.*.roles` を集約。
+  Keycloak 側で対象クライアントのロール付与/Token に `aud` が載っているか確認。
+
+---
+
+## 参考：主要ファイル
+
+* `docker-compose.yaml` … 全体起動（DB-LESS前提）
+* `kong/kong.yml` … DB-LESS の宣言的設定（Service/Route）
+* `kong/kong-deck.yaml` … **DB モード用**の deck 状態ファイル
+* `quarkus-authz/src/main/java/example/api/MeResource.java` … ユーザ情報（roles 集約）
+* `quarkus-authz/src/main/java/org/example/api/MashupResource.java` … 下流呼び出し & 401/403 → 403 整形
+* `frontend/src/api.ts` … 401/403 を「権限エラー」にマップ
+* `frontend/vite.config.ts` … `base: '/app/'`
+
+---
+
+## ライセンス
+
+本リポジトリ内のコードは学習目的のサンプルです。必要に応じてコピー/改変してご利用ください。
+
+---
+
+## 付録：手元で Kong の状態を確認するワンライナー
+
+```bash
+# Routes
+curl -s http://localhost:8001/routes \
+  | jq '.data[] | {name, paths, strip_path, preserve_host, path_handling, service: .service.id}'
+
+# Services
+curl -s http://localhost:8001/services \
+  | jq '.data[] | {name, host, port, path}'
+```
+
+
+---
+
+## 付録：Redis に保管されたセッション情報を確認する（開発時の手引き）
+
+BFF（Quarkus）は **Redis Token State Manager** でセッション相当のトークン状態を保存します（Cookie には参照キーのみ）。
+開発時に中身や存続時間を確認したい場合は、以下の手順で Redis を操作します。
+
+> ⚠️本番では `KEYS *` や `MONITOR` は避けてください。**`SCAN` を使う**のが安全です。
+> このリポジトリの Compose では `redis` サービス名で起動しています。
+
+### 1) Redis CLI を開く
+
+```bash
+# コンテナ上の redis-cli を開く
+docker compose exec redis redis-cli
+```
+
+### 2) キーを探す（SCAN 推奨）
+
+ログイン直後にセッション関連キーが作られます。キー名はバージョンで多少変わるため、**ワイルドカードで探す**のがコツです。
+
+```text
+# まずは全体をざっと（開発専用）
+SCAN 0 MATCH * COUNT 100
+
+# よく使うパターン例（いずれかにヒットするはず）
+SCAN 0 MATCH *session* COUNT 100
+SCAN 0 MATCH *oidc*    COUNT 100
+SCAN 0 MATCH *token*   COUNT 100
+```
+
+> ブラウザの Cookie にある **`q_session`** の値（`localhost:8000` ドメイン）を使うと特定が早いです。
+> Cookie 値の一部でマッチさせる例：`SCAN 0 MATCH *<q_sessionの値の先頭数文字>* COUNT 100`
+
+### 3) キー内容と TTL を見る
+
+キーの **種類** によって読み方が異なります。`TYPE` で判定してから `GET`（string）または `HGETALL`（hash）を使います。
+
+```text
+# 例：見つけたキーを K とする
+TYPE K
+TTL  K          # 残存秒数（例：1200秒 ≒ 20分）
+
+# 文字列キーの場合
+GET K
+
+# ハッシュキーの場合（フィールドと値の一覧）
+HGETALL K
+```
+
+> 値は JSON かシリアライズ済みの文字列です。`GET` の表示をそのまま参考にし、意味が分かりにくい場合は **TTL** で寿命だけ確認するのが手堅いです。
+
+### 4) 特定セッションだけ削除（開発時の再現用）
+
+```text
+DEL K
+```
+
+> ログアウトや消し込みの再現をしたい時に便利です。
+
+### 5) すべてのセッションを消す（開発専用）
+
+```text
+FLUSHDB     # 現在のDBを全消去（開発専用）
+# もしくは
+FLUSHALL    # すべてのDBを全消去（要注意）
+```
+
+> Compose の `redis` は `./data/redis` を永続化しています。完全にリセットしたいときは
+> コンテナ停止後にそのディレクトリを削除する方法でも初期化できます。
 
 ---
