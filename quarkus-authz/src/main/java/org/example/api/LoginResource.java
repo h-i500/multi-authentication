@@ -1,5 +1,5 @@
 // src/main/java/org/example/LoginResource.java
-package org.example;
+package org.example.api;
 
 import java.net.URI;
 import jakarta.inject.Inject;

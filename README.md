@@ -303,6 +303,16 @@ quarkus.http.auth.permission.authenticated.policy=authenticated
 * `GET /secure`（Authenticated）: OIDC 開始 → 認証後 `/app/`
 * `GET /logout`: セッション破棄 → `/app/`
 
+## Redis でセッション確認
+
+```bash
+docker exec -it <redis-container> redis-cli
+127.0.0.1:6379> SCAN 0 MATCH * COUNT 100
+127.0.0.1:6379> TTL "oidc:token:..."   # 残存時間
+```
+
+
+
 ---
 
 ## 下流サービス（A/B）の要点

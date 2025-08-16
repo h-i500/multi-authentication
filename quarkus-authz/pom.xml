@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>org.example</groupId>
@@ -12,15 +14,15 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>17</maven.compiler.release>
 
-    <!-- Quarkus 3.x の推奨指定 -->
+    <!-- ✅ Quarkus 3.x は platform BOM を import する -->
+    <!-- <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id> -->
     <quarkus.platform.group-id>io.quarkus</quarkus.platform.group-id>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
-    <!-- <quarkus.platform.version>3.11.1</quarkus.platform.version>
-    <quarkus-plugin.version>${quarkus.platform.version}</quarkus-plugin.version> -->
     <quarkus.platform.version>3.25.1</quarkus.platform.version>
     <quarkus-plugin.version>${quarkus.platform.version}</quarkus-plugin.version>
   </properties>
 
+  <!-- ✅ BOM を import（依存には version を書かなくてよくなる） -->
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -76,7 +78,50 @@
       <artifactId>quarkus-oidc-redis-token-state-manager</artifactId>
     </dependency>
 
-    <!-- 必要なら Redis クライアント（デフォルトデータソース設定用）-->
+    <!-- Redis クライアント（必要なら） -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-redis-client</artifactId>
+    </dependency>
+
+
+    <!-- Server (RESTEasy Reactive serverは quarkus-rest のままでOK) -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest-jackson</artifactId>
+    </dependency>
+
+    <!-- MicroProfile Rest Client（← こちらを使う） -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest-client</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest-client-jackson</artifactId>
+    </dependency>
+
+    <!-- OIDC / セキュリティなどは既存のまま -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-oidc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-arc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-oidc-redis-token-state-manager</artifactId>
+    </dependency>
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-redis-client</artifactId>
@@ -99,7 +144,7 @@
           </execution>
         </executions>
       </plugin>
-      <!-- （任意）明示したい場合
+      <!-- 任意：明示したい場合だけ
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>

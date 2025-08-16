@@ -55,11 +55,13 @@
     "client": {
       "service-a": [
         { "name": "read" },
-        { "name": "user" }
+        { "name": "user" },
+        { "name": "dummy" } 
       ],
       "service-b": [
         { "name": "read" },
-        { "name": "user" }
+        { "name": "user" },
+        { "name": "dummy" }
       ]
     }
   },
@@ -78,6 +80,22 @@
       "clientRoles": {
         "service-a": ["read", "user"],
         "service-b": ["read", "user"]
+      }
+    },
+
+    {
+      "username": "dummyuser",
+      "enabled": true,
+      "email": "dummyuser@example.com",
+      "firstName": "dummy",
+      "lastName": "user",
+      "emailVerified": false,
+      "credentials": [
+        { "type": "password", "value": "password", "temporary": false }
+      ],
+      "clientRoles": {
+        "service-a": ["user", "dummy"], 
+        "service-b": ["user", "dummy"]
       }
     }
   ]

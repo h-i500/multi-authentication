@@ -1,5 +1,6 @@
+// frontend/src/App.tsx
 import React, { useState } from 'react'
-import { apiGet } from './api'
+import { apiGet, ApiError } from './api'   // ★ 追加：ApiError をインポート
 
 export default function App() {
   const [mashup, setMashup] = useState<any>(null)
@@ -13,7 +14,11 @@ export default function App() {
       const data = await apiGet('/mashup') // BFF -> Service A/B
       setMashup(data)
     } catch (e: any) {
-      setError(e.message)
+      if (e instanceof ApiError) {
+        setError(e.message) // 401/403/500→人間向けメッセージ
+      } else {
+        setError('処理に失敗しました。しばらくしてから再度お試しください。')
+      }
     } finally { setLoading(false) }
   }
 
@@ -23,7 +28,11 @@ export default function App() {
       const data = await apiGet('/me') // 認証ユーザ情報
       setMe(data)
     } catch (e: any) {
-      setError(e.message)
+      if (e instanceof ApiError) {
+        setError(e.message)
+      } else {
+        setError('処理に失敗しました。しばらくしてから再度お試しください。')
+      }
     } finally { setLoading(false) }
   }
 
@@ -35,7 +44,6 @@ export default function App() {
         <button type="button" onClick={() => window.location.assign('/api/login')}>
           ログイン
         </button>
-        {/* <button onClick={() => (location.href = '/api/logout')}>ログアウト</button> */}
         <button type="button" onClick={() => window.location.assign('/api/logout')}>
           ログアウト
         </button>
@@ -50,6 +58,12 @@ export default function App() {
 
       <section style={{ marginTop: 16 }}>
         <h2 style={{ fontSize: 18 }}>me</h2>
+
+        {/* ここは前回追加の roles 表示（me.roles があれば一覧化） */}
+        {Array.isArray(me?.roles) && me.roles.length > 0 && (
+          <ul>{me.roles.map((r: string) => <li key={r}>{r}</li>)}</ul>
+        )}
+
         <pre style={{ background: '#111', color: '#eee', padding: 12, borderRadius: 8 }}>
 {JSON.stringify(me, null, 2)}
         </pre>
