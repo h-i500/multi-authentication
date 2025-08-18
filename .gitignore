@@ -2,6 +2,8 @@
 *.rdb
 *.aof
 *.log
+/data/redis/*
+!/data/redis/.gitkeep
 
 # ==== Java ====
 # Compiled class file
