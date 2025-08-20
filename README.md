@@ -218,7 +218,30 @@ curl -sS -X PUT http://localhost:8001/routes/frontend-dev-route \
   -d strip_path=false -d preserve_host=true -d path_handling=v1
 ```
 
-### 4) 確認
+### 4) Konga 初期セットアップ
+
+1. `http://localhost:1337` にアクセス、管理者ユーザーを作成
+2. 「**+ Add Connection**」→
+
+   * **Name**: kong-local
+   * **Kong Admin URL**: `http://kong:8001`
+   * Health Check: ON → Create
+
+### 5) Keycloak 設定内容（OIDC）
+
+1. `http://localhost:8080` で `admin/admin` でログイン
+2. **Realm** ：`demo-realm`
+3. **Client** ：
+
+   * Client ID: `quarkus-client`
+   * Client authentication: **OFF**（Public）
+   * Access Type: **public**
+   * **Valid Redirect URIs**: `http://localhost:8000/hello` ← 重要（Kong 経由）
+   * （必要なら）Web Origins: `http://localhost:8000` も追加
+4. ユーザー：`testuser / password`, `dummyuser / password`
+
+
+### 6) 確認
 
 ```bash
 # ルート一覧

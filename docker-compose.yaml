@@ -29,6 +29,32 @@ services:
       - ./kong/kong-deck.yaml:/usr/local/kong/declarative/kong-deck.yaml:ro
       - ./kong/kong-nginx-http.conf:/usr/local/kong/nginx-http.conf:ro
 
+  kong-database:
+    image: postgres:10
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_DB: kong
+      POSTGRES_PASSWORD: kong
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+      - ./init-konga-db.sql:/docker-entrypoint-initdb.d/init-konga-db.sql
+  
+  konga:
+    image: pantsel/konga:latest
+    container_name: konga
+    restart: always
+    environment:
+      - NODE_ENV=development
+      - DB_ADAPTER=postgres
+      - DB_HOST=kong-database
+      - DB_USER=kong
+      - DB_PASSWORD=kong
+      - DB_DATABASE=konga
+    ports:
+      - "1337:1337"
+    depends_on:
+      - kong-database
+
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     environment:
@@ -110,3 +136,6 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
     restart: unless-stopped
+
+volumes:
+  kong_data:
